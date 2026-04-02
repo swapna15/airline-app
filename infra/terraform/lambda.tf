@@ -77,49 +77,49 @@ locals {
 
 data "archive_file" "migrate" {
   type        = "zip"
-  source_dir  = "${var.lambda_dist_path}/migrate"
+  source_dir  = "${var.lambda_dist_path}/migrate_pkg"
   output_path = "/tmp/migrate.zip"
 }
 
 data "archive_file" "authorizer" {
   type        = "zip"
-  source_dir  = "${var.lambda_dist_path}/authorizer"
+  source_dir  = "${var.lambda_dist_path}/authorizer_pkg"
   output_path = "/tmp/authorizer.zip"
 }
 
 data "archive_file" "users" {
   type        = "zip"
-  source_dir  = "${var.lambda_dist_path}/users"
+  source_dir  = "${var.lambda_dist_path}/users_pkg"
   output_path = "/tmp/users.zip"
 }
 
 data "archive_file" "flights" {
   type        = "zip"
-  source_dir  = "${var.lambda_dist_path}/flights"
+  source_dir  = "${var.lambda_dist_path}/flights_pkg"
   output_path = "/tmp/flights.zip"
 }
 
 data "archive_file" "bookings" {
   type        = "zip"
-  source_dir  = "${var.lambda_dist_path}/bookings"
+  source_dir  = "${var.lambda_dist_path}/bookings_pkg"
   output_path = "/tmp/bookings.zip"
 }
 
 data "archive_file" "checkin" {
   type        = "zip"
-  source_dir  = "${var.lambda_dist_path}/checkin"
+  source_dir  = "${var.lambda_dist_path}/checkin_pkg"
   output_path = "/tmp/checkin.zip"
 }
 
 data "archive_file" "gate" {
   type        = "zip"
-  source_dir  = "${var.lambda_dist_path}/gate"
+  source_dir  = "${var.lambda_dist_path}/gate_pkg"
   output_path = "/tmp/gate.zip"
 }
 
 data "archive_file" "admin" {
   type        = "zip"
-  source_dir  = "${var.lambda_dist_path}/admin"
+  source_dir  = "${var.lambda_dist_path}/admin_pkg"
   output_path = "/tmp/admin.zip"
 }
 
@@ -128,7 +128,7 @@ resource "aws_lambda_function" "authorizer" {
   function_name    = "${local.name}-authorizer"
   role             = aws_iam_role.lambda.arn
   runtime          = local.lambda_runtime
-  handler          = "handler.handler"
+  handler          = "authorizer/handler.handler"
   filename         = data.archive_file.authorizer.output_path
   source_code_hash = data.archive_file.authorizer.output_base64sha256
   timeout          = 10
@@ -146,7 +146,7 @@ resource "aws_lambda_function" "users" {
   function_name    = "${local.name}-users"
   role             = aws_iam_role.lambda.arn
   runtime          = local.lambda_runtime
-  handler          = "handler.handler"
+  handler          = "users/handler.handler"
   filename         = data.archive_file.users.output_path
   source_code_hash = data.archive_file.users.output_base64sha256
   timeout          = local.lambda_timeout
@@ -167,7 +167,7 @@ resource "aws_lambda_function" "flights" {
   function_name    = "${local.name}-flights"
   role             = aws_iam_role.lambda.arn
   runtime          = local.lambda_runtime
-  handler          = "handler.handler"
+  handler          = "flights/handler.handler"
   filename         = data.archive_file.flights.output_path
   source_code_hash = data.archive_file.flights.output_base64sha256
   timeout          = local.lambda_timeout
@@ -188,7 +188,7 @@ resource "aws_lambda_function" "bookings" {
   function_name    = "${local.name}-bookings"
   role             = aws_iam_role.lambda.arn
   runtime          = local.lambda_runtime
-  handler          = "handler.handler"
+  handler          = "bookings/handler.handler"
   filename         = data.archive_file.bookings.output_path
   source_code_hash = data.archive_file.bookings.output_base64sha256
   timeout          = local.lambda_timeout
@@ -209,7 +209,7 @@ resource "aws_lambda_function" "checkin" {
   function_name    = "${local.name}-checkin"
   role             = aws_iam_role.lambda.arn
   runtime          = local.lambda_runtime
-  handler          = "handler.handler"
+  handler          = "checkin/handler.handler"
   filename         = data.archive_file.checkin.output_path
   source_code_hash = data.archive_file.checkin.output_base64sha256
   timeout          = local.lambda_timeout
@@ -230,7 +230,7 @@ resource "aws_lambda_function" "gate" {
   function_name    = "${local.name}-gate"
   role             = aws_iam_role.lambda.arn
   runtime          = local.lambda_runtime
-  handler          = "handler.handler"
+  handler          = "gate/handler.handler"
   filename         = data.archive_file.gate.output_path
   source_code_hash = data.archive_file.gate.output_base64sha256
   timeout          = local.lambda_timeout
@@ -251,7 +251,7 @@ resource "aws_lambda_function" "admin" {
   function_name    = "${local.name}-admin"
   role             = aws_iam_role.lambda.arn
   runtime          = local.lambda_runtime
-  handler          = "handler.handler"
+  handler          = "admin/handler.handler"
   filename         = data.archive_file.admin.output_path
   source_code_hash = data.archive_file.admin.output_base64sha256
   timeout          = local.lambda_timeout
@@ -272,7 +272,7 @@ resource "aws_lambda_function" "migrate" {
   function_name    = "${local.name}-migrate"
   role             = aws_iam_role.lambda.arn
   runtime          = local.lambda_runtime
-  handler          = "handler.handler"
+  handler          = "migrate/handler.handler"
   filename         = data.archive_file.migrate.output_path
   source_code_hash = data.archive_file.migrate.output_base64sha256
   timeout          = 120

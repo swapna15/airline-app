@@ -1,14 +1,17 @@
 #!/usr/bin/env node
 /**
- * Post-build bundler: copies shared/ and node_modules into each handler's
- * dist subfolder so Terraform can zip them independently.
+ * Post-build bundler: creates a _pkg/ directory per handler with the structure:
  *
- * Output structure:
- *   dist/
- *     authorizer/  handler.js  shared/  node_modules/
- *     users/       handler.js  shared/  node_modules/
- *     flights/     handler.js  shared/  node_modules/
- *     ...
+ *   dist/<handler>_pkg/
+ *     <handler>/handler.js   ← preserves '../shared/' relative import path
+ *     shared/                ← at the same level, so '../shared/db' resolves correctly
+ *     node_modules/
+ *
+ * At Lambda runtime (/var/task/):
+ *   <handler>/handler.js  →  require('../shared/db')  →  /var/task/shared/db.js  ✓
+ *
+ * Terraform zips each <handler>_pkg/ folder.
+ * Lambda handler setting: "<handler>/handler.handler"
  */
 
 const fs   = require('fs');
@@ -31,39 +34,45 @@ function copyDir(src, dest) {
 }
 
 for (const handler of handlers) {
-  const handlerDist = path.join(distRoot, handler);
+  const srcHandlerDir = path.join(distRoot, handler);
 
-  if (!fs.existsSync(handlerDist)) {
+  if (!fs.existsSync(srcHandlerDir)) {
     console.error(`Missing dist/${handler} — did you run "npm run build"?`);
     process.exit(1);
   }
 
-  // Copy shared helpers
-  const sharedSrc  = path.join(distRoot, 'shared');
-  const sharedDest = path.join(handlerDist, 'shared');
+  const pkgDir        = path.join(distRoot, `${handler}_pkg`);
+  const handlerSubDir = path.join(pkgDir, handler);
+
+  // Copy compiled handler files into <handler>/ subdir
+  copyDir(srcHandlerDir, handlerSubDir);
+  console.log(`  copied dist/${handler} → dist/${handler}_pkg/${handler}/`);
+
+  // Copy shared helpers to pkg root (so '../shared/' resolves correctly at runtime)
+  const sharedSrc = path.join(distRoot, 'shared');
   if (fs.existsSync(sharedSrc)) {
-    copyDir(sharedSrc, sharedDest);
-    console.log(`  copied shared → dist/${handler}/shared`);
+    copyDir(sharedSrc, path.join(pkgDir, 'shared'));
+    console.log(`  copied shared → dist/${handler}_pkg/shared/`);
   }
 
-  // Copy node_modules (production deps only — run "npm ci --omit=dev" first)
-  const nmDest = path.join(handlerDist, 'node_modules');
+  // Copy node_modules to pkg root
+  const nmDest = path.join(pkgDir, 'node_modules');
   if (!fs.existsSync(nmDest)) {
     copyDir(nm, nmDest);
-    console.log(`  copied node_modules → dist/${handler}/node_modules`);
-  } else {
-    console.log(`  node_modules already present in dist/${handler}`);
+    console.log(`  copied node_modules → dist/${handler}_pkg/node_modules/`);
+  }
+
+  // For migrate: copy SQL migration files into the handler subdir
+  // so fs.readFileSync(join(__dirname, '001_schema.sql')) resolves correctly
+  if (handler === 'migrate') {
+    const migrationsDir = path.join(root, '..', 'db', 'migrations');
+    if (fs.existsSync(migrationsDir)) {
+      for (const f of fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql'))) {
+        fs.copyFileSync(path.join(migrationsDir, f), path.join(handlerSubDir, f));
+      }
+      console.log(`  copied SQL files → dist/migrate_pkg/migrate/`);
+    }
   }
 }
 
-// Copy SQL migration files into the migrate bundle
-const migrationsDir = path.join(root, '..', 'db', 'migrations');
-const migrateDist   = path.join(distRoot, 'migrate');
-if (fs.existsSync(migrationsDir) && fs.existsSync(migrateDist)) {
-  for (const f of fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql'))) {
-    fs.copyFileSync(path.join(migrationsDir, f), path.join(migrateDist, f));
-  }
-  console.log('  copied SQL files → dist/migrate/');
-}
-
-console.log('\nBundle complete. Terraform can now zip each dist/<handler>/ folder.');
+console.log('\nBundle complete. Terraform can now zip each dist/<handler>_pkg/ folder.');
