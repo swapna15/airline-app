@@ -1,4 +1,4 @@
-name: Tests
+name: Test, Deploy Infra & Frontend
 
 on:
   push:
@@ -26,3 +26,53 @@ jobs:
 
       - name: Run tests
         run: NODE_ENV=test npx jest --runInBand --passWithNoTests
+
+  infra:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    defaults:
+      run:
+        working-directory: infra/terraform
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: us-east-1
+    outputs:
+      api_url: ${{ steps.tf_output.outputs.api_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.5.0
+          terraform_wrapper: false
+
+      - name: Terraform Init
+        run: terraform init
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var="frontend_url=${{ secrets.TF_VAR_FRONTEND_URL }}" \
+            -var="nextauth_secret=${{ secrets.TF_VAR_NEXTAUTH_SECRET }}" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        run: terraform apply -auto-approve tfplan
+
+      - name: Capture API Gateway URL
+        id: tf_output
+        run: echo "api_url=$(terraform output -raw api_gateway_url)" >> $GITHUB_OUTPUT
+
+  deploy:
+    name: Deploy Frontend to Vercel
+    runs-on: ubuntu-latest
+    needs: infra
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Trigger Vercel deploy
+        run: |
+          curl -X POST "${{ secrets.VERCEL_DEPLOY_HOOK_URL }}"
