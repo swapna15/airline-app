@@ -6,12 +6,41 @@ interface FlightSearchParams {
   origin: string;
   destination: string;
   date: string;          // YYYY-MM-DD
-  return_date?: string;  // YYYY-MM-DD (round-trip)
+  return_date?: string;
   adults?: number;
   children?: number;
   infants?: number;
   cabin_class?: 'economy' | 'business' | 'first';
 }
+
+// Duration in minutes computed from timestamps (schema has no duration_minutes column)
+const FLIGHT_SELECT = `
+  f.id, f.flight_number, f.departure_time, f.arrival_time, f.status, f.gate, f.terminal,
+  f.price_economy, f.price_business, f.price_first,
+  f.baggage_carry, f.baggage_checked, f.aircraft,
+  ROUND(EXTRACT(EPOCH FROM (f.arrival_time - f.departure_time))/60) AS duration_minutes,
+  al.name  AS airline_name,
+  al.code  AS airline_code,
+  al.logo  AS airline_logo,
+  dep.code AS origin_code,
+  dep.name AS origin_name,
+  dep.city AS origin_city,
+  arr.code AS destination_code,
+  arr.name AS destination_name,
+  arr.city AS destination_city,
+  COUNT(s.id) FILTER (WHERE s.is_occupied = false AND s.class = 'economy')  AS avail_economy,
+  COUNT(s.id) FILTER (WHERE s.is_occupied = false AND s.class = 'business') AS avail_business,
+  COUNT(s.id) FILTER (WHERE s.is_occupied = false AND s.class = 'first')    AS avail_first
+`;
+
+const FLIGHT_JOINS = `
+  JOIN airlines al  ON al.code  = f.airline_code
+  JOIN airports dep ON dep.code = f.origin_code
+  JOIN airports arr ON arr.code = f.destination_code
+  LEFT JOIN seats s ON s.flight_id = f.id
+`;
+
+const FLIGHT_GROUP = `GROUP BY f.id, al.code, dep.code, arr.code`;
 
 // ── POST /flights/search ──────────────────────────────────────────────────────
 async function searchFlights(body: string | null): Promise<APIGatewayProxyResult> {
@@ -23,67 +52,31 @@ async function searchFlights(body: string | null): Promise<APIGatewayProxyResult
   const cabinClass = data.cabin_class ?? 'economy';
   const passengers = (data.adults ?? 1) + (data.children ?? 0);
 
-  // Find outbound flights with available seats
   const outbound = await query(
-    `SELECT
-       f.id, f.flight_number, f.departure_time, f.arrival_time,
-       f.duration_minutes, f.status,
-       al.name  AS airline_name,
-       al.iata_code AS airline_code,
-       al.logo_url  AS airline_logo,
-       dep.iata_code AS origin_code,
-       dep.name      AS origin_name,
-       dep.city      AS origin_city,
-       arr.iata_code AS destination_code,
-       arr.name      AS destination_name,
-       arr.city      AS destination_city,
-       COUNT(s.id) FILTER (WHERE s.status = 'available' AND s.cabin_class = $4) AS available_seats,
-       MIN(s.price)  FILTER (WHERE s.status = 'available' AND s.cabin_class = $4) AS price
-     FROM flights f
-     JOIN airlines  al  ON al.id  = f.airline_id
-     JOIN airports  dep ON dep.id = f.origin_id
-     JOIN airports  arr ON arr.id = f.destination_id
-     JOIN seats     s   ON s.flight_id = f.id
-     WHERE dep.iata_code = $1
-       AND arr.iata_code = $2
+    `SELECT ${FLIGHT_SELECT}
+     FROM flights f ${FLIGHT_JOINS}
+     WHERE dep.code = $1
+       AND arr.code = $2
        AND DATE(f.departure_time AT TIME ZONE 'UTC') = $3::date
-       AND f.status NOT IN ('cancelled', 'diverted')
-     GROUP BY f.id, al.id, dep.id, arr.id
-     HAVING COUNT(s.id) FILTER (WHERE s.status = 'available' AND s.cabin_class = $4) >= $5
+       AND f.status NOT IN ('cancelled')
+     ${FLIGHT_GROUP}
+     HAVING COUNT(s.id) FILTER (WHERE s.is_occupied = false AND s.class = $4) >= $5
      ORDER BY f.departure_time`,
     [data.origin.toUpperCase(), data.destination.toUpperCase(), data.date, cabinClass, passengers],
   );
 
   const result: Record<string, unknown> = { outbound };
 
-  // Round-trip: also search return flights
   if (data.return_date) {
     const inbound = await query(
-      `SELECT
-         f.id, f.flight_number, f.departure_time, f.arrival_time,
-         f.duration_minutes, f.status,
-         al.name  AS airline_name,
-         al.iata_code AS airline_code,
-         al.logo_url  AS airline_logo,
-         dep.iata_code AS origin_code,
-         dep.name      AS origin_name,
-         dep.city      AS origin_city,
-         arr.iata_code AS destination_code,
-         arr.name      AS destination_name,
-         arr.city      AS destination_city,
-         COUNT(s.id) FILTER (WHERE s.status = 'available' AND s.cabin_class = $4) AS available_seats,
-         MIN(s.price)  FILTER (WHERE s.status = 'available' AND s.cabin_class = $4) AS price
-       FROM flights f
-       JOIN airlines  al  ON al.id  = f.airline_id
-       JOIN airports  dep ON dep.id = f.origin_id
-       JOIN airports  arr ON arr.id = f.destination_id
-       JOIN seats     s   ON s.flight_id = f.id
-       WHERE dep.iata_code = $2
-         AND arr.iata_code = $1
+      `SELECT ${FLIGHT_SELECT}
+       FROM flights f ${FLIGHT_JOINS}
+       WHERE dep.code = $2
+         AND arr.code = $1
          AND DATE(f.departure_time AT TIME ZONE 'UTC') = $3::date
-         AND f.status NOT IN ('cancelled', 'diverted')
-       GROUP BY f.id, al.id, dep.id, arr.id
-       HAVING COUNT(s.id) FILTER (WHERE s.status = 'available' AND s.cabin_class = $4) >= $5
+         AND f.status NOT IN ('cancelled')
+       ${FLIGHT_GROUP}
+       HAVING COUNT(s.id) FILTER (WHERE s.is_occupied = false AND s.class = $4) >= $5
        ORDER BY f.departure_time`,
       [data.origin.toUpperCase(), data.destination.toUpperCase(), data.return_date, cabinClass, passengers],
     );
@@ -96,17 +89,10 @@ async function searchFlights(body: string | null): Promise<APIGatewayProxyResult
 // ── GET /flights/{id} ─────────────────────────────────────────────────────────
 async function getFlight(id: string): Promise<APIGatewayProxyResult> {
   const flight = await queryOne(
-    `SELECT
-       f.id, f.flight_number, f.departure_time, f.arrival_time,
-       f.duration_minutes, f.status, f.gate, f.terminal,
-       al.name AS airline_name, al.iata_code AS airline_code, al.logo_url AS airline_logo,
-       dep.iata_code AS origin_code, dep.name AS origin_name, dep.city AS origin_city,
-       arr.iata_code AS destination_code, arr.name AS destination_name, arr.city AS destination_city
-     FROM flights f
-     JOIN airlines al  ON al.id  = f.airline_id
-     JOIN airports dep ON dep.id = f.origin_id
-     JOIN airports arr ON arr.id = f.destination_id
-     WHERE f.id = $1`,
+    `SELECT ${FLIGHT_SELECT}
+     FROM flights f ${FLIGHT_JOINS}
+     WHERE f.id = $1
+     ${FLIGHT_GROUP}`,
     [id],
   );
   if (!flight) return notFound('Flight');
@@ -119,20 +105,27 @@ async function getSeatMap(flightId: string, cabinClass?: string): Promise<APIGat
   let cabinFilter = '';
   if (cabinClass) {
     params.push(cabinClass);
-    cabinFilter = `AND cabin_class = $${params.length}`;
+    cabinFilter = `AND s.class = $${params.length}`;
   }
 
   const seats = await query(
-    `SELECT id, seat_number, cabin_class, seat_type, status, price, amenities
-     FROM seats
-     WHERE flight_id = $1 ${cabinFilter}
-     ORDER BY cabin_class, seat_number`,
+    `SELECT
+       s.id,
+       s.row_number AS row,
+       s.letter,
+       s.type,
+       s.class,
+       s.is_occupied AS "isOccupied",
+       s.extra_fee   AS price,
+       s.features
+     FROM seats s
+     WHERE s.flight_id = $1 ${cabinFilter}
+     ORDER BY s.class, s.row_number, s.letter`,
     params,
   );
 
-  // Group by cabin class for easier rendering
   const grouped = seats.reduce<Record<string, unknown[]>>((acc, seat) => {
-    const cabin = (seat as any).cabin_class as string;
+    const cabin = (seat as any).class as string;
     if (!acc[cabin]) acc[cabin] = [];
     acc[cabin].push(seat);
     return acc;
@@ -144,8 +137,8 @@ async function getSeatMap(flightId: string, cabinClass?: string): Promise<APIGat
 // ── Router ────────────────────────────────────────────────────────────────────
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   try {
-    const method = event.httpMethod;
-    const path = event.path;
+    const method   = event.httpMethod;
+    const path     = event.path;
     const flightId = event.pathParameters?.id;
     const cabinClass = event.queryStringParameters?.cabin_class;
 
