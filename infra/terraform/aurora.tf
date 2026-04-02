@@ -5,23 +5,8 @@ resource "aws_db_subnet_group" "main" {
   tags       = { Name = "${local.name}-db-subnet-group" }
 }
 
-# ── Secrets Manager — DB credentials ─────────────────────────────────────────
-resource "aws_secretsmanager_secret" "db" {
-  name                    = "${local.name}/db-credentials"
-  recovery_window_in_days = 7
-  tags                    = { Name = "${local.name}-db-secret" }
-}
-
-resource "aws_secretsmanager_secret_version" "db" {
-  secret_id = aws_secretsmanager_secret.db.id
-  secret_string = jsonencode({
-    username = var.db_master_username
-    password = aws_rds_cluster.main.master_password
-    host     = aws_rds_cluster.main.endpoint
-    port     = 5432
-    dbname   = var.db_name
-  })
-}
+# Aurora manages its own Secrets Manager secret when manage_master_user_password = true.
+# Access the ARN via: aws_rds_cluster.main.master_user_secret[0].secret_arn
 
 # ── Aurora Serverless v2 ──────────────────────────────────────────────────────
 resource "aws_rds_cluster" "main" {
@@ -82,7 +67,7 @@ resource "aws_iam_role_policy" "rds_proxy_secrets" {
     Statement = [{
       Effect   = "Allow"
       Action   = ["secretsmanager:GetSecretValue", "secretsmanager:DescribeSecret"]
-      Resource = aws_secretsmanager_secret.db.arn
+      Resource = aws_rds_cluster.main.master_user_secret[0].secret_arn
     }]
   })
 }
@@ -100,7 +85,7 @@ resource "aws_db_proxy" "main" {
 
   auth {
     auth_scheme = "SECRETS"
-    secret_arn  = aws_secretsmanager_secret.db.arn
+    secret_arn  = aws_rds_cluster.main.master_user_secret[0].secret_arn
     iam_auth    = "DISABLED"
   }
 

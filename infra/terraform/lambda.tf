@@ -39,7 +39,7 @@ resource "aws_iam_role_policy" "lambda_secrets" {
         Effect   = "Allow"
         Action   = ["secretsmanager:GetSecretValue"]
         Resource = [
-          aws_secretsmanager_secret.db.arn,
+          aws_rds_cluster.main.master_user_secret[0].secret_arn,
           aws_secretsmanager_secret.nextauth.arn,
         ]
       },
@@ -59,10 +59,11 @@ locals {
   lambda_memory  = 512
 
   lambda_env = {
-    NODE_ENV       = var.environment
-    DB_SECRET_ARN  = aws_secretsmanager_secret.db.arn
-    DB_PROXY_HOST  = aws_db_proxy.main.endpoint
-    FRONTEND_URL   = var.frontend_url
+    NODE_ENV        = var.environment
+    DB_SECRET_ARN   = aws_rds_cluster.main.master_user_secret[0].secret_arn
+    DB_PROXY_HOST   = aws_db_proxy.main.endpoint
+    DB_NAME         = var.db_name
+    FRONTEND_URL    = var.frontend_url
     NEXTAUTH_SECRET = var.nextauth_secret
   }
 

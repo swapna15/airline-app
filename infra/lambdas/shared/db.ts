@@ -31,7 +31,7 @@ export async function getPool(): Promise<Pool> {
   pool = new Pool({
     host: process.env.DB_PROXY_HOST ?? secret.host,  // RDS Proxy endpoint
     port: secret.port ?? 5432,
-    database: secret.dbname,
+    database: secret.dbname ?? process.env.DB_NAME,  // Aurora-managed secret omits dbname
     user: secret.username,
     password: secret.password,
     ssl: { rejectUnauthorized: true },

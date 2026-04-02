@@ -21,8 +21,8 @@ output "rds_proxy_endpoint" {
 }
 
 output "db_secret_arn" {
-  description = "Secrets Manager ARN for DB credentials"
-  value       = aws_secretsmanager_secret.db.arn
+  description = "Secrets Manager ARN for DB credentials (Aurora-managed)"
+  value       = aws_rds_cluster.main.master_user_secret[0].secret_arn
 }
 
 output "vpc_id" {
