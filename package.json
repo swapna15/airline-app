@@ -5,7 +5,6 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "build:ci": "NODE_ENV=test jest --runInBand --passWithNoTests && next build",
     "start": "next start",
     "lint": "next lint",
     "test": "jest",
