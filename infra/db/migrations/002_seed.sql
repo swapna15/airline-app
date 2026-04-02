@@ -98,7 +98,8 @@ BEGIN
                ELSE 'middle' END,
           (random() > 0.6),
           CASE WHEN l IN ('A','C','D','F') THEN 25 ELSE 0 END
-        );
+        )
+        ON CONFLICT (flight_id, row_number, letter) DO NOTHING;
       END LOOP;
     END LOOP;
 
@@ -110,7 +111,8 @@ BEGIN
           flt_id, r, l, 'business',
           CASE WHEN l IN ('A','F') THEN 'window' ELSE 'aisle' END,
           (random() > 0.7), 0
-        );
+        )
+        ON CONFLICT (flight_id, row_number, letter) DO NOTHING;
       END LOOP;
     END LOOP;
 
@@ -118,7 +120,8 @@ BEGIN
     FOR r IN 1..3 LOOP
       FOREACH l IN ARRAY seat_letters_fst LOOP
         INSERT INTO seats (flight_id, row_number, letter, class, type, is_occupied, extra_fee)
-        VALUES (flt_id, r, l, 'first', 'window', (random() > 0.8), 0);
+        VALUES (flt_id, r, l, 'first', 'window', (random() > 0.8), 0)
+        ON CONFLICT (flight_id, row_number, letter) DO NOTHING;
       END LOOP;
     END LOOP;
 

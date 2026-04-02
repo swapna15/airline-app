@@ -41,6 +41,10 @@ export const handler = async (): Promise<{ applied: string[]; skipped: string[] 
       console.log(`Applying ${migration.name}...`);
       await client.query('BEGIN');
       try {
+        // For seed: clear any partial data from previous failed runs
+        if (migration.name === '002_seed') {
+          await client.query('TRUNCATE flights CASCADE');
+        }
         await client.query(migration.sql);
         await client.query(
           'INSERT INTO schema_migrations (name) VALUES ($1)',
