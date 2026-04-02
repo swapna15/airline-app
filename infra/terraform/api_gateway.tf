@@ -234,51 +234,52 @@ resource "aws_api_gateway_resource" "admin_flights" {
 }
 
 # ── Method + Integration module ───────────────────────────────────────────────
-# Define all routes as: [method, resource_id, lambda_function_arn, requires_auth]
+# Static map keys are required — for_each keys must be known at plan time,
+# so resource IDs (known after apply) cannot be used as keys.
 locals {
-  routes = [
+  routes = {
     # Users — public (no authorizer)
-    { method = "POST", resource_id = aws_api_gateway_resource.users_register.id,       lambda_arn = aws_lambda_function.users.invoke_arn,    auth = false },
-    { method = "POST", resource_id = aws_api_gateway_resource.users_login.id,          lambda_arn = aws_lambda_function.users.invoke_arn,    auth = false },
-    { method = "GET",  resource_id = aws_api_gateway_resource.users_id.id,             lambda_arn = aws_lambda_function.users.invoke_arn,    auth = true  },
-    { method = "PATCH", resource_id = aws_api_gateway_resource.users_id_role.id,       lambda_arn = aws_lambda_function.users.invoke_arn,    auth = true  },
+    "POST-users-register"          = { method = "POST",   resource_id = aws_api_gateway_resource.users_register.id,              lambda_arn = aws_lambda_function.users.invoke_arn,    auth = false },
+    "POST-users-login"             = { method = "POST",   resource_id = aws_api_gateway_resource.users_login.id,                  lambda_arn = aws_lambda_function.users.invoke_arn,    auth = false },
+    "GET-users-id"                 = { method = "GET",    resource_id = aws_api_gateway_resource.users_id.id,                     lambda_arn = aws_lambda_function.users.invoke_arn,    auth = true  },
+    "PATCH-users-id-role"          = { method = "PATCH",  resource_id = aws_api_gateway_resource.users_id_role.id,                lambda_arn = aws_lambda_function.users.invoke_arn,    auth = true  },
 
     # Flights — search is public; seat map requires auth
-    { method = "POST", resource_id = aws_api_gateway_resource.flights_search.id,       lambda_arn = aws_lambda_function.flights.invoke_arn,  auth = false },
-    { method = "GET",  resource_id = aws_api_gateway_resource.flights_id.id,           lambda_arn = aws_lambda_function.flights.invoke_arn,  auth = false },
-    { method = "GET",  resource_id = aws_api_gateway_resource.flights_id_seats.id,     lambda_arn = aws_lambda_function.flights.invoke_arn,  auth = true  },
+    "POST-flights-search"          = { method = "POST",   resource_id = aws_api_gateway_resource.flights_search.id,               lambda_arn = aws_lambda_function.flights.invoke_arn,  auth = false },
+    "GET-flights-id"               = { method = "GET",    resource_id = aws_api_gateway_resource.flights_id.id,                   lambda_arn = aws_lambda_function.flights.invoke_arn,  auth = false },
+    "GET-flights-id-seats"         = { method = "GET",    resource_id = aws_api_gateway_resource.flights_id_seats.id,             lambda_arn = aws_lambda_function.flights.invoke_arn,  auth = true  },
 
     # Bookings — all require auth
-    { method = "POST",   resource_id = aws_api_gateway_resource.bookings.id,           lambda_arn = aws_lambda_function.bookings.invoke_arn, auth = true  },
-    { method = "GET",    resource_id = aws_api_gateway_resource.bookings.id,           lambda_arn = aws_lambda_function.bookings.invoke_arn, auth = true  },
-    { method = "GET",    resource_id = aws_api_gateway_resource.bookings_id.id,        lambda_arn = aws_lambda_function.bookings.invoke_arn, auth = true  },
-    { method = "DELETE", resource_id = aws_api_gateway_resource.bookings_id.id,        lambda_arn = aws_lambda_function.bookings.invoke_arn, auth = true  },
+    "POST-bookings"                = { method = "POST",   resource_id = aws_api_gateway_resource.bookings.id,                     lambda_arn = aws_lambda_function.bookings.invoke_arn, auth = true  },
+    "GET-bookings"                 = { method = "GET",    resource_id = aws_api_gateway_resource.bookings.id,                     lambda_arn = aws_lambda_function.bookings.invoke_arn, auth = true  },
+    "GET-bookings-id"              = { method = "GET",    resource_id = aws_api_gateway_resource.bookings_id.id,                  lambda_arn = aws_lambda_function.bookings.invoke_arn, auth = true  },
+    "DELETE-bookings-id"           = { method = "DELETE", resource_id = aws_api_gateway_resource.bookings_id.id,                  lambda_arn = aws_lambda_function.bookings.invoke_arn, auth = true  },
 
     # Check-in — all require auth
-    { method = "GET",  resource_id = aws_api_gateway_resource.checkin.id,              lambda_arn = aws_lambda_function.checkin.invoke_arn,  auth = true  },
-    { method = "POST", resource_id = aws_api_gateway_resource.checkin.id,              lambda_arn = aws_lambda_function.checkin.invoke_arn,  auth = true  },
-    { method = "GET",  resource_id = aws_api_gateway_resource.checkin_id_boarding_pass.id, lambda_arn = aws_lambda_function.checkin.invoke_arn, auth = true },
-    { method = "GET",  resource_id = aws_api_gateway_resource.checkin_flight_id.id,    lambda_arn = aws_lambda_function.checkin.invoke_arn,  auth = true  },
+    "GET-checkin"                  = { method = "GET",    resource_id = aws_api_gateway_resource.checkin.id,                      lambda_arn = aws_lambda_function.checkin.invoke_arn,  auth = true  },
+    "POST-checkin"                 = { method = "POST",   resource_id = aws_api_gateway_resource.checkin.id,                      lambda_arn = aws_lambda_function.checkin.invoke_arn,  auth = true  },
+    "GET-checkin-id-boarding-pass" = { method = "GET",    resource_id = aws_api_gateway_resource.checkin_id_boarding_pass.id,     lambda_arn = aws_lambda_function.checkin.invoke_arn,  auth = true  },
+    "GET-checkin-flight-id"        = { method = "GET",    resource_id = aws_api_gateway_resource.checkin_flight_id.id,            lambda_arn = aws_lambda_function.checkin.invoke_arn,  auth = true  },
 
     # Gate — all require auth
-    { method = "GET",   resource_id = aws_api_gateway_resource.gate_flights.id,        lambda_arn = aws_lambda_function.gate.invoke_arn,     auth = true  },
-    { method = "GET",   resource_id = aws_api_gateway_resource.gate_flights_id.id,     lambda_arn = aws_lambda_function.gate.invoke_arn,     auth = true  },
-    { method = "PATCH", resource_id = aws_api_gateway_resource.gate_flights_id_status.id, lambda_arn = aws_lambda_function.gate.invoke_arn,  auth = true  },
-    { method = "POST",  resource_id = aws_api_gateway_resource.gate_flights_id_board.id,  lambda_arn = aws_lambda_function.gate.invoke_arn,  auth = true  },
-    { method = "GET",   resource_id = aws_api_gateway_resource.gate_flights_id_manifest.id, lambda_arn = aws_lambda_function.gate.invoke_arn, auth = true },
+    "GET-gate-flights"             = { method = "GET",    resource_id = aws_api_gateway_resource.gate_flights.id,                 lambda_arn = aws_lambda_function.gate.invoke_arn,     auth = true  },
+    "GET-gate-flights-id"          = { method = "GET",    resource_id = aws_api_gateway_resource.gate_flights_id.id,              lambda_arn = aws_lambda_function.gate.invoke_arn,     auth = true  },
+    "PATCH-gate-flights-id-status" = { method = "PATCH",  resource_id = aws_api_gateway_resource.gate_flights_id_status.id,       lambda_arn = aws_lambda_function.gate.invoke_arn,     auth = true  },
+    "POST-gate-flights-id-board"   = { method = "POST",   resource_id = aws_api_gateway_resource.gate_flights_id_board.id,        lambda_arn = aws_lambda_function.gate.invoke_arn,     auth = true  },
+    "GET-gate-flights-id-manifest" = { method = "GET",    resource_id = aws_api_gateway_resource.gate_flights_id_manifest.id,     lambda_arn = aws_lambda_function.gate.invoke_arn,     auth = true  },
 
     # Admin — all require auth
-    { method = "GET", resource_id = aws_api_gateway_resource.admin_stats.id,           lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
-    { method = "GET", resource_id = aws_api_gateway_resource.admin_users.id,           lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
-    { method = "GET", resource_id = aws_api_gateway_resource.admin_users_id.id,        lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
-    { method = "PATCH",  resource_id = aws_api_gateway_resource.admin_users_id_role.id, lambda_arn = aws_lambda_function.admin.invoke_arn,   auth = true  },
-    { method = "DELETE", resource_id = aws_api_gateway_resource.admin_users_id.id,     lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
-    { method = "GET",    resource_id = aws_api_gateway_resource.admin_flights.id,      lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
-  ]
+    "GET-admin-stats"              = { method = "GET",    resource_id = aws_api_gateway_resource.admin_stats.id,                  lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
+    "GET-admin-users"              = { method = "GET",    resource_id = aws_api_gateway_resource.admin_users.id,                  lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
+    "GET-admin-users-id"           = { method = "GET",    resource_id = aws_api_gateway_resource.admin_users_id.id,               lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
+    "PATCH-admin-users-id-role"    = { method = "PATCH",  resource_id = aws_api_gateway_resource.admin_users_id_role.id,          lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
+    "DELETE-admin-users-id"        = { method = "DELETE", resource_id = aws_api_gateway_resource.admin_users_id.id,               lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
+    "GET-admin-flights"            = { method = "GET",    resource_id = aws_api_gateway_resource.admin_flights.id,                lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
+  }
 }
 
 resource "aws_api_gateway_method" "routes" {
-  for_each = { for i, r in local.routes : "${r.method}-${r.resource_id}" => r }
+  for_each = local.routes
 
   rest_api_id   = aws_api_gateway_rest_api.main.id
   resource_id   = each.value.resource_id
@@ -288,7 +289,7 @@ resource "aws_api_gateway_method" "routes" {
 }
 
 resource "aws_api_gateway_integration" "routes" {
-  for_each = { for i, r in local.routes : "${r.method}-${r.resource_id}" => r }
+  for_each = local.routes
 
   rest_api_id             = aws_api_gateway_rest_api.main.id
   resource_id             = each.value.resource_id
