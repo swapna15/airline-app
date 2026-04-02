@@ -28,7 +28,7 @@ resource "aws_rds_cluster" "main" {
   cluster_identifier      = "${local.name}-aurora"
   engine                  = "aurora-postgresql"
   engine_mode             = "provisioned"
-  engine_version          = "15.5"
+  engine_version          = "15.8"
   database_name           = var.db_name
   master_username         = var.db_master_username
   manage_master_user_password = true   # Secrets Manager rotation managed by AWS
@@ -85,15 +85,6 @@ resource "aws_iam_role_policy" "rds_proxy_secrets" {
       Resource = aws_secretsmanager_secret.db.arn
     }]
   })
-}
-
-# ── RDS Service-Linked Role (required for RDS Proxy) ─────────────────────────
-resource "aws_iam_service_linked_role" "rds" {
-  aws_service_name = "rds.amazonaws.com"
-  # Ignore if it already exists
-  lifecycle {
-    ignore_changes = [aws_service_name]
-  }
 }
 
 # ── RDS Proxy ─────────────────────────────────────────────────────────────────
