@@ -55,8 +55,8 @@ resource "aws_iam_role_policy" "lambda_secrets" {
 # ── Common Lambda settings ────────────────────────────────────────────────────
 locals {
   lambda_runtime = "nodejs20.x"
-  lambda_timeout = 30
-  lambda_memory  = 512
+  lambda_timeout = 29  # Match API Gateway's max timeout
+  lambda_memory  = 1024 # More memory = more CPU = faster cold starts
 
   lambda_env = {
     NODE_ENV        = var.environment

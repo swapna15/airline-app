@@ -34,10 +34,11 @@ export async function getPool(): Promise<Pool> {
     database: secret.dbname ?? process.env.DB_NAME,  // Aurora-managed secret omits dbname
     user: secret.username,
     password: secret.password,
-    ssl: { rejectUnauthorized: true },
+    ssl: { rejectUnauthorized: false },
     max: 1,          // keep it low — RDS Proxy handles connection pooling
     idleTimeoutMillis: 0,
-    connectionTimeoutMillis: 3000,
+    connectionTimeoutMillis: 10000,  // 10s — handles Aurora Serverless cold start
+    query_timeout: 25000,            // 25s — stay under Lambda/API GW timeout
   });
 
   return pool;

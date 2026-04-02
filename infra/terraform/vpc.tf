@@ -137,3 +137,15 @@ resource "aws_security_group" "aurora" {
 
   tags = { Name = "${local.name}-aurora-sg" }
 }
+
+# ── VPC Endpoints (avoid NAT for AWS service calls) ──────────────────────────
+resource "aws_vpc_endpoint" "secretsmanager" {
+  vpc_id              = aws_vpc.main.id
+  service_name        = "com.amazonaws.${var.aws_region}.secretsmanager"
+  vpc_endpoint_type   = "Interface"
+  subnet_ids          = aws_subnet.private[*].id
+  security_group_ids  = [aws_security_group.lambda.id]
+  private_dns_enabled = true
+
+  tags = { Name = "${local.name}-secretsmanager-endpoint" }
+}
