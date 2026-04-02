@@ -15,6 +15,7 @@ export default function CheckoutPage() {
 
   useEffect(() => {
     if (!selectedFlight || !passengers.length) { router.replace('/'); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!selectedFlight) return null;

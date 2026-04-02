@@ -8,8 +8,8 @@ export async function GET(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const token = (session as any).accessToken as string | undefined;
-  const userId = req.nextUrl.searchParams.get('user_id') ?? (session.user as any).id;
+  const token = (session as { accessToken?: string }).accessToken;
+  const userId = req.nextUrl.searchParams.get('user_id') ?? (session.user as { id?: string }).id;
 
   if (!API_URL) {
     return NextResponse.json({ bookings: [] });
@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const token = (session as any).accessToken as string | undefined;
+  const token = (session as { accessToken?: string }).accessToken;
   const body = await req.json();
 
   if (!API_URL) {

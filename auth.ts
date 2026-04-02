@@ -1,7 +1,9 @@
 import NextAuth from 'next-auth';
+import type { User } from 'next-auth';
 import GoogleProvider from 'next-auth/providers/google';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { roleFromEmail } from '@/types/roles';
+import type { UserRole } from '@/types/roles';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -30,7 +32,7 @@ export const authOptions = {
             });
             if (!res.ok) return null;
             const user = await res.json() as { id: string; name: string; email: string; role: string };
-            return { id: user.id, name: user.name, email: user.email, role: user.role };
+            return { id: user.id, name: user.name, email: user.email, role: user.role as UserRole } as User;
           } catch {
             return null;
           }
@@ -43,7 +45,7 @@ export const authOptions = {
           name: credentials.email.split('@')[0],
           email: credentials.email,
           role,
-        };
+        } as User;
       },
     }),
   ],

@@ -19,6 +19,7 @@ export default function SeatsPage() {
       .getSeatMap(selectedFlight.id, searchParams?.class ?? 'economy')
       .then(setSeatMap)
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const toggleSeat = (seat: Seat) => {

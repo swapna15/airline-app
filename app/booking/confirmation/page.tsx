@@ -12,6 +12,7 @@ export default function ConfirmationPage() {
 
   useEffect(() => {
     if (!confirmation) router.replace('/');
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (!confirmation || !selectedFlight) return null;

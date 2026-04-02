@@ -11,7 +11,7 @@ export async function GET(
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const token = (session as any).accessToken as string | undefined;
+  const token = (session as { accessToken?: string }).accessToken;
 
   if (!API_URL) return NextResponse.json({ error: 'Backend not configured' }, { status: 503 });
 
@@ -29,7 +29,7 @@ export async function DELETE(
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
 
-  const token = (session as any).accessToken as string | undefined;
+  const token = (session as { accessToken?: string }).accessToken;
 
   if (!API_URL) return NextResponse.json({ error: 'Backend not configured' }, { status: 503 });
 

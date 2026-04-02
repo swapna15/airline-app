@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Plane, AlertTriangle, CheckCircle, Clock, Sparkles, Loader2 } from 'lucide-react';
+import { Plane, AlertTriangle, Clock, Sparkles, Loader2 } from 'lucide-react';
 
 interface CoordFlight {
   id: string;
@@ -10,14 +10,14 @@ interface CoordFlight {
   origin: string;
   destination: string;
   scheduled: string;
-  status: 'On Time' | 'Delayed' | 'Cancelled' | 'Departed';
+  status: 'On Time' | 'Delayed' | 'Cancelled' | 'Departed' | 'Boarding';
   delayMinutes: number;
   aircraft: string;
   availableSeats: { economy: number; business: number; first: number };
 }
 
 const MOCK_FLIGHTS: CoordFlight[] = [
-  { id: '1', flight: 'BA1000', airline: 'British Airways', origin: 'JFK', destination: 'LHR', scheduled: '09:45', status: 'Boarding' as any, delayMinutes: 0, aircraft: 'Boeing 777', availableSeats: { economy: 22, business: 3, first: 2 } },
+  { id: '1', flight: 'BA1000', airline: 'British Airways', origin: 'JFK', destination: 'LHR', scheduled: '09:45', status: 'Boarding' as CoordFlight['status'], delayMinutes: 0, aircraft: 'Boeing 777', availableSeats: { economy: 22, business: 3, first: 2 } },
   { id: '2', flight: 'AA2111', airline: 'American Airlines', origin: 'JFK', destination: 'CDG', scheduled: '11:15', status: 'Delayed', delayMinutes: 45, aircraft: 'Airbus A330', availableSeats: { economy: 76, business: 12, first: 0 } },
   { id: '3', flight: 'UA3322', airline: 'United Airlines', origin: 'JFK', destination: 'NRT', scheduled: '07:30', status: 'Departed', delayMinutes: 0, aircraft: 'Boeing 787', availableSeats: { economy: 0, business: 0, first: 0 } },
   { id: '4', flight: 'LH4410', airline: 'Lufthansa', origin: 'JFK', destination: 'FRA', scheduled: '14:00', status: 'On Time', delayMinutes: 0, aircraft: 'Airbus A380', availableSeats: { economy: 120, business: 24, first: 8 } },
@@ -74,7 +74,7 @@ export default function CoordinatorPage() {
   };
 
   const counts = {
-    onTime: flights.filter((f) => f.status === 'On Time' || f.status === 'Departed' || f.status === 'Boarding' as any).length,
+    onTime: flights.filter((f) => f.status === 'On Time' || f.status === 'Departed' || f.status === 'Boarding').length,
     delayed: flights.filter((f) => f.status === 'Delayed').length,
     cancelled: flights.filter((f) => f.status === 'Cancelled').length,
   };
@@ -83,7 +83,7 @@ export default function CoordinatorPage() {
     <div className="max-w-5xl mx-auto px-4 py-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Flight Operations</h1>
-        <p className="text-sm text-gray-500 mt-1">Monitor and manage today's departures</p>
+        <p className="text-sm text-gray-500 mt-1">Monitor and manage today&apos;s departures</p>
       </div>
 
       {/* Stats */}
@@ -204,7 +204,7 @@ export default function CoordinatorPage() {
                   {aiAdvice ? (
                     <p className="text-sm text-gray-700 leading-relaxed">{aiAdvice}</p>
                   ) : (
-                    <p className="text-xs text-gray-400">Click "Get AI Advice" for rebooking recommendations powered by Claude.</p>
+                    <p className="text-xs text-gray-400">Click &quot;Get AI Advice&quot; for rebooking recommendations powered by Claude.</p>
                   )}
                 </div>
               )}

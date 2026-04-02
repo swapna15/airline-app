@@ -28,7 +28,7 @@ export async function POST(req: NextRequest) {
         adults: params.passengers?.adults,
         children: params.passengers?.children,
         infants: params.passengers?.infants,
-        cabin_class: params.cabinClass,
+        cabin_class: params.class,
       }),
     });
     const data = await res.json();
