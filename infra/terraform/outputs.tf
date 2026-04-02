@@ -3,6 +3,11 @@ output "api_gateway_url" {
   value       = aws_api_gateway_stage.main.invoke_url
 }
 
+output "migrate_function_name" {
+  description = "Name of the DB migration Lambda function"
+  value       = aws_lambda_function.migrate.function_name
+}
+
 output "aurora_endpoint" {
   description = "Aurora cluster writer endpoint"
   value       = aws_rds_cluster.main.endpoint

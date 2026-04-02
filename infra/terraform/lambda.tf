@@ -75,6 +75,12 @@ locals {
 # ── Archive each Lambda from compiled dist ─────────────────────────────────────
 # Assumes: cd infra/lambdas && npm run build produces dist/{handler}/handler.js
 
+data "archive_file" "migrate" {
+  type        = "zip"
+  source_dir  = "${var.lambda_dist_path}/migrate"
+  output_path = "/tmp/migrate.zip"
+}
+
 data "archive_file" "authorizer" {
   type        = "zip"
   source_dir  = "${var.lambda_dist_path}/authorizer"
@@ -259,4 +265,25 @@ resource "aws_lambda_function" "admin" {
   }
 
   tags = { Name = "${local.name}-admin" }
+}
+
+# ── Lambda: Migrate (one-shot DB migration, invoked by CI after terraform apply) ─
+resource "aws_lambda_function" "migrate" {
+  function_name    = "${local.name}-migrate"
+  role             = aws_iam_role.lambda.arn
+  runtime          = local.lambda_runtime
+  handler          = "handler.handler"
+  filename         = data.archive_file.migrate.output_path
+  source_code_hash = data.archive_file.migrate.output_base64sha256
+  timeout          = 120
+  memory_size      = 256
+
+  environment { variables = local.lambda_env }
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_config.subnet_ids
+    security_group_ids = local.lambda_vpc_config.security_group_ids
+  }
+
+  tags = { Name = "${local.name}-migrate" }
 }

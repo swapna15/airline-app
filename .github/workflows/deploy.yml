@@ -79,6 +79,24 @@ jobs:
         id: tf_output
         run: echo "api_url=$(terraform output -raw api_gateway_url)" >> $GITHUB_OUTPUT
 
+      - name: Run DB migrations
+        run: |
+          aws lambda invoke \
+            --function-name $(terraform output -raw migrate_function_name) \
+            --payload '{}' \
+            --cli-binary-format raw-in-base64-out \
+            /tmp/migration-result.json
+          echo "Migration result: $(cat /tmp/migration-result.json)"
+          python3 -c "
+          import json, sys
+          r = json.load(open('/tmp/migration-result.json'))
+          if 'errorMessage' in r:
+              print('Migration failed:', r.get('errorMessage'), r.get('errorType'))
+              sys.exit(1)
+          print('Applied:', r.get('applied', []))
+          print('Skipped:', r.get('skipped', []))
+          "
+
   deploy:
     name: Deploy Frontend to Vercel
     runs-on: ubuntu-latest

@@ -18,7 +18,7 @@ const root     = path.resolve(__dirname, '..');
 const distRoot = path.join(root, 'dist');
 const nm       = path.join(root, 'node_modules');
 
-const handlers = ['authorizer', 'users', 'flights', 'bookings', 'checkin', 'gate', 'admin'];
+const handlers = ['authorizer', 'users', 'flights', 'bookings', 'checkin', 'gate', 'admin', 'migrate'];
 
 function copyDir(src, dest) {
   fs.mkdirSync(dest, { recursive: true });
@@ -54,6 +54,16 @@ for (const handler of handlers) {
   } else {
     console.log(`  node_modules already present in dist/${handler}`);
   }
+}
+
+// Copy SQL migration files into the migrate bundle
+const migrationsDir = path.join(root, '..', 'db', 'migrations');
+const migrateDist   = path.join(distRoot, 'migrate');
+if (fs.existsSync(migrationsDir) && fs.existsSync(migrateDist)) {
+  for (const f of fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql'))) {
+    fs.copyFileSync(path.join(migrationsDir, f), path.join(migrateDist, f));
+  }
+  console.log('  copied SQL files → dist/migrate/');
 }
 
 console.log('\nBundle complete. Terraform can now zip each dist/<handler>/ folder.');
