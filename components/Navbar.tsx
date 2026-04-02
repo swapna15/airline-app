@@ -41,7 +41,7 @@ export function Navbar() {
   const { brand } = adapter;
   const { data: session } = useSession();
   const role = (session?.user?.role ?? 'passenger') as UserRole;
-  const links = NAV_LINKS[role];
+  const links = session ? NAV_LINKS[role] : [];
 
   return (
     <nav className="flex items-center justify-between px-6 py-4 border-b border-gray-200 bg-white">
