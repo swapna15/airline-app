@@ -64,6 +64,8 @@ DECLARE
   seat_letters_bus  CHAR(1)[] := ARRAY['A','C','D','F'];
   seat_letters_fst  CHAR(1)[] := ARRAY['A','B'];
 BEGIN
+  -- Skip if flights already exist so this block is safe to re-run
+  IF EXISTS (SELECT 1 FROM flights LIMIT 1) THEN RETURN; END IF;
   FOR i IN 0..5 LOOP
     INSERT INTO flights (
       flight_number, airline_code, origin_code, destination_code,
