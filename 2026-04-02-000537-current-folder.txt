@@ -1,0 +1,2217 @@
+▗ ▗   ▖ ▖  Claude Code v2.1.90
+           Sonnet 4.6 · Claude Pro
+  ▘▘ ▝▝    ~/Documents/GitHub/AI/airline-app
+
+❯ current folder                                                                
+
+  Listed 1 directory (ctrl+o to expand)
+
+⏺ Current directory: /Users/Eeshan/Documents/GitHub/AI/airline-app
+
+  A Next.js project with the following structure:
+  - app/ — Next.js app router pages/routes
+  - auth.ts — authentication setup
+  - components/ — shared React components
+  - core/ — core business logic
+  - types/ — TypeScript type definitions
+  - utils/ — utility functions
+  - Config files: next.config.mjs, tailwind.config.ts, tsconfig.json,
+  package.json
+
+❯ ok so update the current requirements file with the new changes we have amde  
+
+⏺ Let me check memory and the project structure first.
+
+  Searched for 1 pattern, read 1 file, recalled 1 memory (ctrl+o to expand)
+
+⏺ Bash(git -C /Users/Eeshan/Documents/GitHub/AI/airline-app log --oneline -20
+      2>/dev/null; git -C /Users/Eeshan/Documents/GitHub/AI/airline-app diff
+      --stat HEAD 2>/dev…)
+  ⎿  Interrupted · What should Claude do instead?
+
+❯ no git yet                                                                    
+
+⏺ Got it. Let me explore the current codebase to understand what's been built.
+
+  Searched for 1 pattern, read 9 files (ctrl+o to expand)
+
+⏺ Now I have a clear picture of what's been implemented. Let me compare against
+  the requirements and update the file.
+
+  Key additions I can see in the code vs the requirements:
+  1. Authentication (NextAuth with Google + Credentials providers,
+  login/register pages) — not mentioned at all in requirements
+  2. Return flights (returnFlight in BookingRequest, tripType + returnDate in
+  SearchParams) — FR5/FR6 don't mention this
+  3. Booking state persistence via localStorage with a proper React Context
+  (bookingStore.tsx) — FR5 says "React Context + localStorage" but the
+  implementation detail of the STORAGE_KEY and provider pattern is more specific
+  4. Agent Orchestrator (/core/orchestrator.ts) with intent-based routing — FR7
+  mentions agents but not the orchestrator pattern
+  5. /api/agents unified endpoint — FR7/NFR3 only mentions /api/claude proxy
+  6. getBooking + cancelBooking on the adapter interface — FR6 mentions it but
+  the AirlineAdapter interface makes it contractual
+  7. PNR field in BookingConfirmation — not in requirements
+  8. Passport expiry + nationality fields on Passenger — FR4 only mentions
+  "passport (optional)"
+  9. Round-trip search (tripType: 'oneWay' | 'roundTrip') — FR2 doesn't mention
+  round trips
+  10. Multi-segment flights (FlightSegment[] array on Flight) — FR2 implies
+  single-segment
+
+⏺ Update(.claude/specs/requirements.md)
+  ⎿  Added 31 lines, removed 14 lines
+       9  
+      10  ### FR1 — Airline Adapter System
+      11  - Any airline can implement the `AirlineAdapter` interface to c
+          onnect their own APIs
+      12 +- The interface contract includes: `searchFlights`, `getSeatMap
+         +`, `createBooking`, `getBooking`, `cancelBooking`              
+      13  - A built-in `MockAdapter` ships for development and demo purpo
+          ses
+      14  - Adapters are registered at startup via a central `AdapterRegi
+          stry`
+      14 -- Branding (colors, logo, name) is configurable per adapter    
+      15 +- Branding (`BrandConfig`: name, logo, primaryColor, secondaryC
+         +olor, fontFamily) is configurable per adapter                  
+      16  
+      17  ### FR2 — Flight Search
+      17 -- Users can search by origin, destination, date, passengers, an
+         -d cabin class                                                  
+      18 -- Claude SearchAgent translates natural language queries into s
+         -tructured search params                                        
+      18 +- Users can search by origin, destination, departure date, pass
+         +engers (adults/children/infants), and cabin class              
+      19 +- Trip type: one-way or round-trip; round-trip includes a retur
+         +n date field                                                   
+      20 +- Claude SearchAgent translates natural language queries into s
+         +tructured `SearchParams`                                       
+      21  - Results are filterable by: price, duration, stops, airline, d
+          eparture time
+      22  - Results display: airline, flight number, times, duration, sto
+          ps, price per class
+      23 +- Flights are multi-segment (`FlightSegment[]`) to support conn
+         +ecting itineraries                                             
+      24  
+      25  ### FR3 — Seat Selection
+      23 -- Interactive seat map rendered from adapter-provided seat data
+      26 +- Interactive seat map rendered from adapter-provided seat data
+         + (`getSeatMap`)                                                
+      27  - Seat types: window, middle, aisle — with visual distinction
+      28  - Class zones: economy, business, first — switchable view
+      29  - Occupied/available/selected states with pricing overlay
+      30 +- Seat features list (e.g. extra legroom) supported per seat   
+      31  
+      32  ### FR4 — Passenger Details
+      29 -- Form for each passenger: title, first/last name, DOB, passpor
+         -t (optional)                                                   
+      33 +- Form for each passenger: title, first/last name, DOB, passpor
+         +t number (optional), passport expiry (optional), nationality (o
+         +ptional)                                                       
+      34  - Supports adult, child, and infant passenger types
+      31 -- Contact info: email, phone, billing address                  
+      35 +- Each passenger can have an assigned seat                     
+      36 +- Contact info: email, phone, full billing address (street, cit
+         +y, state, zip, country)                                        
+      37  
+      38  ### FR5 — Checkout & Booking
+      39  - Price breakdown: base fare, taxes, fees, seat fees, total
+      40 +- Supports outbound flight and optional return flight in a sing
+         +le booking                                                     
+      41  - Mock payment form (card number, expiry, CVV) — no real paymen
+          ts
+      36 -- On submit: adapter's `createBooking()` is called, returns boo
+         -king reference                                                 
+      37 -- Booking stored in session state (React Context + localStorage
+         -)                                                              
+      42 +- On submit: adapter's `createBooking()` is called, returns boo
+         +king reference + PNR                                           
+      43 +- Booking stored in session state (React Context + localStorage
+         + via `BookingProvider`)                                        
+      44 +- `reset()` clears both context state and localStorage         
+      45  
+      46  ### FR6 — Booking Confirmation
+      40 -- Displays booking reference, itinerary, passenger names, total
+         - paid                                                          
+      47 +- Displays booking reference, PNR, itinerary, passenger names, 
+         +total paid                                                     
+      48 +- Confirmation status: confirmed / pending / cancelled         
+      49  - Option to download/print (future)
+      42 -- Option to manage booking (cancel, modify — via adapter)      
+      50 +- Option to manage booking (cancel via `cancelBooking`, retriev
+         +e via `getBooking`)                                            
+      51  
+      52  ### FR7 — Claude AI Agents
+      53  - **SearchAgent**: Natural language → structured `SearchParams`
+          ; suggests alternatives
+      54  - **RecommendationAgent**: Recommends seat/class based on trip 
+          type and preferences
+      55  - **SupportAgent**: Answers FAQs, explains policies, handles co
+          mplaints via chat
+      56  - **DisruptionAgent**: Detects disruptions (simulated), suggest
+          s rebooking options
+      49 -- All agents share a conversation context per booking session  
+      57 +- All agents extend `BaseAgent` and use `claude-sonnet-4-6` via
+         + the Anthropic SDK                                             
+      58 +- Agents accept an `AgentContext` (airlineName, flightId, booki
+         +ngId, …) to personalise responses                              
+      59 +- An `AgentOrchestrator` routes requests by intent (`search | r
+         +ecommend | support | disruption`)                              
+      60 +- Agents are called server-side via the `/api/agents` endpoint 
+         +(POST `{ agent, payload, context }`)                           
+      61  
+      51 -### FR8 — Embeddable UI Kit                                    
+      62 +### FR8 — Authentication                                       
+      63 +- Users can register and log in with email/password (credential
+         +s-based, mock DB)                                              
+      64 +- Google OAuth sign-in supported via NextAuth                  
+      65 +- Session managed with JWT strategy; sign-in page at `/login`, 
+         +register at `/register`                                        
+      66 +- Auth is handled by NextAuth with `GOOGLE_CLIENT_ID`, `GOOGLE_
+         +CLIENT_SECRET`, and `NEXTAUTH_SECRET` env vars                 
+      67 +                                                               
+      68 +### FR9 — Embeddable UI Kit                                    
+      69  - All React components are self-contained and accept a `theme` 
+          prop
+      70  - Airline colors/fonts are injected via CSS variables from bran
+          ding config
+      71  - Components can be used standalone or as a full booking flow
+     ...
+      76  ## Non-Functional Requirements
+      77  - NFR1: TypeScript throughout — strict mode
+      78  - NFR2: No real external APIs or payments required (mock-first)
+      62 -- NFR3: All Claude calls go through `/api/claude` proxy (API ke
+         -y stays server-side)                                           
+      79 +- NFR3: Claude calls are made server-side only; `/api/agents` p
+         +roxies all agent requests (API key never exposed to client)    
+      80  - NFR4: App must run with `npm run dev` — no infra setup needed
+      64 -- NFR5: Agents must be extensible — new agent types addable wit
+         -hout core changes                                              
+      81 +- NFR5: Agents must be extensible — new agent types addable by 
+         +extending `BaseAgent` and registering an intent in `AgentOrches
+         +trator`                                                        
+
+⏺ Requirements updated. Here's a summary of what changed:
+
+  - FR1: Added explicit AirlineAdapter method list (getBooking, cancelBooking);
+  detailed BrandConfig fields
+  - FR2: Added round-trip / one-way search, return date, multi-segment flights
+  (FlightSegment[])
+  - FR3: Added seat features list
+  - FR4: Added passport expiry + nationality fields; seat assignment per
+  passenger; full address structure
+  - FR5: Added return flight support, PNR in confirmation, explicit
+  BookingProvider / reset() behaviour
+  - FR6: Added PNR display, status enum (confirmed/pending/cancelled)
+  - FR7: Expanded significantly — BaseAgent, claude-sonnet-4-6, AgentContext,
+  AgentOrchestrator, /api/agents endpoint
+  - FR8 (new): Authentication — NextAuth, Google OAuth, credentials login, JWT
+  sessions, /login + /register pages
+  - FR9 (was FR8): Embeddable UI kit (renumbered)
+  - NFR3/NFR5: Updated to reflect /api/agents proxy and BaseAgent extension
+  pattern
+
+✻ Crunched for 1m 11s
+
+❯ update the other documents along with it like design and tasks                
+
+  Searched for 1 pattern, read 2 files (ctrl+o to expand)
+
+⏺ Let me also check the auth and page files to ensure accuracy.
+
+  Read 2 files (ctrl+o to expand)
+
+⏺ Now I have enough context. Let me update both files.
+
+⏺ Write(.claude/specs/design.md)
+  ⎿  Added 63 lines, removed 30 lines
+      20  │
+      21  ├── core/
+      22  │   ├── adapters/
+      23 -│   │   ├── types.ts             # AirlineAdapter interface + B
+         -randConfig type                                                
+      23 +│   │   ├── types.ts             # Re-exports AirlineAdapter + 
+         +BrandConfig from types/                                        
+      24  │   │   ├── registry.ts          # AdapterRegistry (singleton)
+      25  │   │   └── mock/
+      26  │   │       └── index.ts         # MockAdapter (demo data, no r
+          eal API)
+      27  │   ├── agents/
+      28 -│   │   ├── base.ts              # BaseAgent class (shared Clau
+         -de call logic)                                                 
+      28 +│   │   ├── base.ts              # BaseAgent class (shared Clau
+         +de call logic, AgentContext)                                   
+      29  │   │   ├── SearchAgent.ts       # NL query → SearchParams
+      30  │   │   ├── RecommendationAgent.ts  # Seat/class recommendation
+          s
+      31  │   │   ├── SupportAgent.ts      # FAQ + policy answers
+      32  │   │   └── DisruptionAgent.ts   # Disruption detection + reboo
+          king
+      33 -│   └── orchestrator.ts          # AgentOrchestrator: routes re
+         -quests to agents                                               
+      33 +│   └── orchestrator.ts          # AgentOrchestrator: routes by
+         + AgentIntent                                                   
+      34  │
+      35  ├── types/
+      36 -│   ├── airline.ts               # AirlineAdapter, BrandConfig,
+         - AdapterRegistry                                               
+      37 -│   ├── flight.ts                # Airport, Airline, Flight, Fl
+         -ightSegment, Seat                                              
+      38 -│   └── booking.ts               # Passenger, ContactInfo, Book
+         -ingDetails, PriceBreakdown                                     
+      36 +│   ├── airline.ts               # AirlineAdapter, BrandConfig 
+      37 +│   ├── flight.ts                # Airport, Airline, Flight, Fl
+         +ightSegment, Seat, SearchParams, CabinClass                    
+      38 +│   └── booking.ts               # Passenger, ContactInfo, Book
+         +ingRequest, BookingConfirmation, BookingDetails, PriceBreakdown
+      39  │
+      40  ├── utils/
+      41 -│   ├── mockData.ts              # generateMockFlights(), gener
+         -ateSeatMap()                                                   
+      42 -│   └── bookingStore.tsx         # BookingContext + useBooking(
+         -) hook                                                         
+      41 +│   ├── mockData.ts              # generateMockFlights(), gener
+         +ateSeatMap(), AIRPORTS constant                                
+      42 +│   └── bookingStore.tsx         # BookingProvider + useBooking
+         +() hook (React Context + localStorage)                         
+      43  │
+      44 +├── auth.ts                      # NextAuth config (Google + Cr
+         +edentials providers, JWT sessions)                             
+      45 +│                                                              
+      46  ├── app/
+      45 -│   ├── layout.tsx               # Root layout: Navbar + Bookin
+         -gProvider + theme injection                                    
+      46 -│   ├── page.tsx                 # Home: flight search form + C
+         -laude NL search bar                                            
+      47 +│   ├── layout.tsx               # Root layout: SessionProvider
+         + + BookingProvider + Navbar + theme injection                  
+      48 +│   ├── page.tsx                 # Home: SearchForm + Claude NL
+         + search bar                                                    
+      49 +│   ├── providers.tsx            # Client-side SessionProvider 
+         +wrapper                                                        
+      50 +│   ├── login/page.tsx           # Sign-in: email/password + Go
+         +ogle SSO                                                       
+      51 +│   ├── register/page.tsx        # Registration form           
+      52  │   ├── search/
+      48 -│   │   └── page.tsx             # Flight results with filters 
+         -sidebar                                                        
+      53 +│   │   ├── SearchForm.tsx       # Search form component (NL + 
+         +structured fields)                                             
+      54 +│   │   └── results/page.tsx     # Flight results with filters 
+         +sidebar                                                        
+      55  │   ├── booking/
+      56  │   │   ├── seats/page.tsx       # Seat map selection
+      57  │   │   ├── passengers/page.tsx  # Passenger + contact form
+      58  │   │   ├── checkout/page.tsx    # Price summary + mock payment
+      59  │   │   └── confirmation/page.tsx # Booking reference + itinera
+          ry
+      60  │   └── api/
+      55 -│       ├── claude/route.ts      # Anthropic API proxy (streams
+         - supported)                                                    
+      56 -│       ├── agents/route.ts      # Agent dispatch endpoint (POS
+         -T {agent, payload})                                            
+      61 +│       ├── claude/route.ts      # Anthropic API proxy         
+      62 +│       ├── agents/route.ts      # Agent dispatch endpoint (POS
+         +T {agent, payload, context})                                   
+      63  │       └── flights/route.ts     # Flight search via registered
+           adapter
+      64  │
+      65  └── components/
+      66      ├── Navbar.tsx
+      67      ├── FlightCard.tsx
+      68      ├── SeatMap.tsx
+      63 -    ├── PassengerForm.tsx                                      
+      69      ├── PriceSummary.tsx
+      70      └── ClaudeAssistant.tsx      # Floating chat panel (agent-a
+          ware)
+      71  ```
+     ...
+      75  ## Airline Adapter Interface
+      76  
+      77  ```typescript
+      73 -// core/adapters/types.ts                                      
+      78 +// types/airline.ts                                            
+      79  export interface BrandConfig {
+      80    name: string;
+      81    logo: string;           // URL or emoji
+     ...
+      107  All agents extend `BaseAgent`:
+      108  ```typescript
+      109  // core/agents/base.ts
+      110 +export interface AgentContext {                               
+      111 +  airlineName?: string;                                       
+      112 +  flightId?: string;                                          
+      113 +  bookingId?: string;                                         
+      114 +  [key: string]: unknown;                                     
+      115 +}                                                             
+      116 +                                                              
+      117  export abstract class BaseAgent {
+      118    protected model = 'claude-sonnet-4-6';
+      119    abstract systemPrompt: string;
+      120    abstract name: string;
+      121  
+      122    async invoke(userMessage: string, context?: AgentContext): P
+           romise<string>
+      111 -  async stream(userMessage: string, context?: AgentContext): A
+          -syncGenerator<string>                                         
+      123  }
+      124  ```
+      125  
+      126 +System prompts support `{airline}` interpolation via `buildSys
+          +temPrompt(context)` — replaced with `context.airlineName` at c
+          +all time.                                                     
+      127 +                                                              
+      128  ### SearchAgent
+      116 -- System prompt: "You are a flight search assistant. Extract o
+          -rigin, destination, date, passengers, and cabin class from the
+          - user's message. Return valid JSON matching SearchParams."    
+      129 +- System prompt: extracts origin, destination, date, passenger
+          +s, and cabin class from natural language. Returns `SearchParam
+          +s` JSON.                                                      
+      130  - Input: natural language string
+      118 -- Output: `SearchParams` JSON                                 
+      131 +- Output: `SearchParams` JSON (client strips markdown code fen
+          +ces before parsing)                                           
+      132  
+      133  ### RecommendationAgent
+      121 -- System prompt: "You are an airline seat expert. Given the fl
+          -ight details and passenger preferences, recommend the best sea
+          -t and cabin class."                                           
+      134 +- System prompt: seat/class expert — recommends based on fligh
+          +t details and passenger preferences                           
+      135  - Input: flight details + passenger count + trip purpose
+      136  - Output: recommendation with rationale
+      137  
+      138  ### SupportAgent
+      126 -- System prompt: "You are a helpful airline customer support a
+          -gent for {airline.name}. Answer questions about baggage, check
+          --in, policies, and bookings."                                 
+      139 +- System prompt: customer support for `{airline}` — answers ba
+          +ggage, check-in, policy, and booking questions                
+      140  - Input: user question + booking context
+      141  - Output: helpful answer
+      142  
+      143  ### DisruptionAgent
+      131 -- System prompt: "You monitor flight disruptions. Given a flig
+          -ht and potential delay/cancellation, suggest the best rebookin
+          -g options."                                                   
+      144 +- System prompt: monitors flight disruptions — suggests best r
+          +ebooking options given delay/cancellation                     
+      145  - Input: original flight + available alternatives
+      146  - Output: ranked suggestions with reasoning
+      147  
+     ...
+      151  
+      152  ```typescript
+      153  // core/orchestrator.ts
+      154 +export type AgentIntent = 'search' | 'recommend' | 'support' |
+          + 'disruption';                                                
+      155 +                                                              
+      156  export class AgentOrchestrator {
+      142 -  route(intent: AgentIntent, payload: unknown): Promise<string
+          ->                                                             
+      157 +  async route(intent: AgentIntent, payload: string, context?: 
+          +AgentContext): Promise<string>                                
+      158  }
+      159 +                                                              
+      160 +export const orchestrator = AgentOrchestrator; // singleton ex
+          +port                                                          
+      161  ```
+      162  
+      146 -The `/api/agents` route uses the orchestrator to dispatch:    
+      163 +The `/api/agents` route dispatches via the orchestrator:      
+      164  ```
+      165  POST /api/agents
+      149 -{ "agent": "search" | "recommend" | "support" | "disruption", 
+          -"payload": {...} }                                            
+      166 +{ "agent": "search" | "recommend" | "support" | "disruption", 
+          +"payload": "...", "context": { ... } }                        
+      167 +→ { "result": "..." }                                         
+      168  ```
+      169  
+      170 +The orchestrator is imported dynamically (server-side only) in
+          +side the route handler to avoid bundling the Anthropic SDK on 
+          +the client.                                                   
+      171 +                                                              
+      172  ---
+      173  
+      174 +## Authentication                                             
+      175 +                                                              
+      176 +Handled by NextAuth (`auth.ts`):                              
+      177 +- **Providers**: Google OAuth + Credentials (email/password)  
+      178 +- **Session strategy**: JWT                                   
+      179 +- **Pages**: sign-in at `/login`, registration at `/register` 
+      180 +- **Credentials authorize**: mock lookup (replace with real DB
+          +); returns `{ id, name, email }`                              
+      181 +- **Environment variables required**: `GOOGLE_CLIENT_ID`, `GOO
+          +GLE_CLIENT_SECRET`, `NEXTAUTH_SECRET`                         
+      182 +- `SessionProvider` is wrapped in `app/providers.tsx` (client 
+          +component) and mounted in `app/layout.tsx`                    
+      183 +                                                              
+      184 +---                                                           
+      185 +                                                              
+      186  ## State Management
+      187  
+      156 -`BookingContext` holds the full booking session:              
+      188 +`BookingContext` (in `utils/bookingStore.tsx`) holds the full 
+          +booking session:                                              
+      189  ```typescript
+      190  interface BookingState {
+      159 -  adapter: AirlineAdapter | null;                             
+      191 +  adapter: AirlineAdapter;        // defaults to MockAdapter, 
+          +never null                                                    
+      192    searchParams: SearchParams | null;
+      193    selectedFlight: Flight | null;
+      194    selectedSeats: Seat[];
+      195    passengers: Passenger[];
+      196    contactInfo: ContactInfo | null;
+      197    priceBreakdown: PriceBreakdown | null;
+      166 -  booking: BookingConfirmation | null;                        
+      198 +  confirmation: BookingConfirmation | null;                   
+      199  }
+      200  ```
+      169 -Persisted to `localStorage` so refreshing the page doesn't los
+          -e the session.                                                
+      201  
+      202 +All state is persisted to `localStorage` (key: `airlineos_book
+          +ing`) on every update, excluding the `adapter` instance. `rese
+          +t()` clears both context state and localStorage.              
+      203 +                                                              
+      204  ---
+      205  
+      206  ## Claude API Proxy
+      207  
+      175 -`/api/claude` accepts the full Anthropic messages payload and 
+          -proxies it, keeping the API key server-side. Supports streamin
+          -g via `stream: true`.                                         
+      208 +`/api/claude` accepts the full Anthropic messages payload and 
+          +proxies it, keeping the API key server-side.                  
+      209  
+      177 -`/api/agents` wraps specific agent invocations with pre-config
+          -ured system prompts so the frontend never constructs raw Claud
+          -e payloads.                                                   
+      210 +`/api/agents` wraps specific agent invocations with pre-config
+          +ured system prompts. The frontend posts `{ agent, payload, con
+          +text }` and receives `{ result }` — it never constructs raw Cl
+          +aude payloads directly.                                       
+      211  
+      212  ---
+      213  
+
+⏺ Write(.claude/specs/tasks.md)
+  ⎿  Added 48 lines, removed 39 lines
+       1  # AirlineOS — Implementation Tasks
+       2  
+       3  ## Phase 1: Foundation
+       4 -- [ ] T1.1 Install additional dependencies: `lucide-react`, `cl
+         -sx`, `uuid`, `@anthropic-ai/sdk`                               
+       5 -- [ ] T1.2 Create `types/airline.ts` — AirlineAdapter interface
+         -, BrandConfig, SearchParams                                    
+       6 -- [ ] T1.3 Create `types/flight.ts` — Airport, Flight, FlightSe
+         -gment, Seat, CabinClass                                        
+       7 -- [ ] T1.4 Create `types/booking.ts` — Passenger, ContactInfo, 
+         -BookingDetails, PriceBreakdown                                 
+       8 -- [ ] T1.5 Create `core/adapters/types.ts` — re-export adapter 
+         -interface                                                      
+       9 -- [ ] T1.6 Create `core/adapters/registry.ts` — AdapterRegistry
+         - singleton                                                     
+      10 -- [ ] T1.7 Create `core/adapters/mock/index.ts` — MockAdapter w
+         -ith demo data                                                  
+      11 -- [ ] T1.8 Create `utils/mockData.ts` — generateMockFlights(), 
+         -generateSeatMap()                                              
+      12 -- [ ] T1.9 Create `utils/bookingStore.tsx` — BookingContext + u
+         -seBooking() hook                                               
+       4 +- [x] T1.1 Install additional dependencies: `lucide-react`, `cl
+         +sx`, `uuid`, `@anthropic-ai/sdk`, `next-auth`                  
+       5 +- [x] T1.2 Create `types/airline.ts` — AirlineAdapter interface
+         +, BrandConfig                                                  
+       6 +- [x] T1.3 Create `types/flight.ts` — Airport, Airline, Flight,
+         + FlightSegment, Seat, SearchParams, CabinClass                 
+       7 +- [x] T1.4 Create `types/booking.ts` — Passenger, ContactInfo, 
+         +BookingRequest, BookingConfirmation, BookingDetails, PriceBreak
+         +down                                                           
+       8 +- [x] T1.5 Create `core/adapters/types.ts` — re-export adapter 
+         +interface                                                      
+       9 +- [x] T1.6 Create `core/adapters/registry.ts` — AdapterRegistry
+         + singleton                                                     
+      10 +- [x] T1.7 Create `core/adapters/mock/index.ts` — MockAdapter w
+         +ith demo data                                                  
+      11 +- [x] T1.8 Create `utils/mockData.ts` — generateMockFlights(), 
+         +generateSeatMap(), AIRPORTS constant                           
+      12 +- [x] T1.9 Create `utils/bookingStore.tsx` — BookingProvider + 
+         +useBooking() hook (React Context + localStorage)               
+      13  
+      14  ## Phase 2: Agent Layer
+      15 -- [ ] T2.1 Create `core/agents/base.ts` — BaseAgent with invoke
+         -() and stream()                                                
+      16 -- [ ] T2.2 Create `core/agents/SearchAgent.ts`                 
+      17 -- [ ] T2.3 Create `core/agents/RecommendationAgent.ts`         
+      18 -- [ ] T2.4 Create `core/agents/SupportAgent.ts`                
+      19 -- [ ] T2.5 Create `core/agents/DisruptionAgent.ts`             
+      20 -- [ ] T2.6 Create `core/orchestrator.ts` — AgentOrchestrator   
+      15 +- [x] T2.1 Create `core/agents/base.ts` — BaseAgent with invoke
+         +() and AgentContext interface                                  
+      16 +- [x] T2.2 Create `core/agents/SearchAgent.ts`                 
+      17 +- [x] T2.3 Create `core/agents/RecommendationAgent.ts`         
+      18 +- [x] T2.4 Create `core/agents/SupportAgent.ts`                
+      19 +- [x] T2.5 Create `core/agents/DisruptionAgent.ts`             
+      20 +- [x] T2.6 Create `core/orchestrator.ts` — AgentOrchestrator wi
+         +th intent-based routing                                        
+      21  
+      22  ## Phase 3: API Routes
+      23 -- [ ] T3.1 Create `app/api/claude/route.ts` — Anthropic proxy (
+         -streaming)                                                     
+      24 -- [ ] T3.2 Create `app/api/agents/route.ts` — Agent dispatch vi
+         -a orchestrator                                                 
+      25 -- [ ] T3.3 Create `app/api/flights/route.ts` — Flight search vi
+         -a adapter                                                      
+      23 +- [x] T3.1 Create `app/api/claude/route.ts` — Anthropic proxy  
+      24 +- [x] T3.2 Create `app/api/agents/route.ts` — Agent dispatch vi
+         +a orchestrator (POST `{ agent, payload, context }`)            
+      25 +- [x] T3.3 Create `app/api/flights/route.ts` — Flight search vi
+         +a adapter                                                      
+      26  
+      27 -## Phase 4: UI Components                                      
+      28 -- [ ] T4.1 Create `components/Navbar.tsx`                      
+      29 -- [ ] T4.2 Create `components/FlightCard.tsx`                  
+      30 -- [ ] T4.3 Create `components/SeatMap.tsx`                     
+      31 -- [ ] T4.4 Create `components/PassengerForm.tsx`               
+      32 -- [ ] T4.5 Create `components/PriceSummary.tsx`                
+      33 -- [ ] T4.6 Create `components/ClaudeAssistant.tsx` — floating c
+         -hat panel                                                      
+      27 +## Phase 4: Authentication                                     
+      28 +- [x] T4.1 Create `auth.ts` — NextAuth config with Google + Cre
+         +dentials providers, JWT session strategy                       
+      29 +- [x] T4.2 Create `app/providers.tsx` — client-side SessionProv
+         +ider wrapper                                                   
+      30 +- [x] T4.3 Build `app/login/page.tsx` — email/password form + G
+         +oogle SSO button                                               
+      31 +- [x] T4.4 Build `app/register/page.tsx` — registration form   
+      32  
+      35 -## Phase 5: Pages                                              
+      36 -- [ ] T5.1 Update `app/layout.tsx` — BookingProvider + theme CS
+         -S vars + Navbar                                                
+      37 -- [ ] T5.2 Build `app/page.tsx` — search form + Claude NL searc
+         -h bar                                                          
+      38 -- [ ] T5.3 Build `app/search/page.tsx` — flight results + filte
+         -rs                                                             
+      39 -- [ ] T5.4 Build `app/booking/seats/page.tsx` — seat map       
+      40 -- [ ] T5.5 Build `app/booking/passengers/page.tsx` — passenger 
+         -form                                                           
+      41 -- [ ] T5.6 Build `app/booking/checkout/page.tsx` — summary + mo
+         -ck payment                                                     
+      42 -- [ ] T5.7 Build `app/booking/confirmation/page.tsx` — booking 
+         -reference                                                      
+      33 +## Phase 5: UI Components                                      
+      34 +- [x] T5.1 Create `components/Navbar.tsx`                      
+      35 +- [x] T5.2 Create `components/FlightCard.tsx`                  
+      36 +- [x] T5.3 Create `components/SeatMap.tsx`                     
+      37 +- [x] T5.4 Create `components/PriceSummary.tsx`                
+      38 +- [x] T5.5 Create `components/ClaudeAssistant.tsx` — floating c
+         +hat panel                                                      
+      39  
+      44 -## Phase 6: Claude Commands                                    
+      45 -- [ ] T6.1 Create `.claude/commands/add-airline.md` — scaffold 
+         -new adapter                                                    
+      46 -- [ ] T6.2 Create `.claude/commands/run-agent.md` — invoke agen
+         -t from CLI                                                     
+      40 +## Phase 6: Pages                                              
+      41 +- [x] T6.1 Update `app/layout.tsx` — SessionProvider + BookingP
+         +rovider + Navbar + theme CSS vars                              
+      42 +- [x] T6.2 Build `app/page.tsx` — SearchForm + Claude NL search
+         + bar                                                           
+      43 +- [x] T6.3 Build `app/search/SearchForm.tsx` — structured form 
+         ++ AI search via `/api/agents`                                  
+      44 +- [x] T6.4 Build `app/search/results/page.tsx` — flight results
+         + + filters                                                     
+      45 +- [x] T6.5 Build `app/booking/seats/page.tsx` — seat map select
+         +ion                                                            
+      46 +- [x] T6.6 Build `app/booking/passengers/page.tsx` — passenger 
+         ++ contact form                                                 
+      47 +- [x] T6.7 Build `app/booking/checkout/page.tsx` — price summar
+         +y + mock payment                                               
+      48 +- [x] T6.8 Build `app/booking/confirmation/page.tsx` — booking 
+         +reference + itinerary                                          
+      49  
+      50 +## Phase 7: Claude Commands                                    
+      51 +- [x] T7.1 Create `.claude/commands/add-airline.md` — scaffold 
+         +new adapter                                                    
+      52 +- [x] T7.2 Create `.claude/commands/run-agent.md` — invoke agen
+         +t from CLI                                                     
+      53 +                                                               
+      54  ## Verification Checklist
+      55  - [ ] `npm run dev` — loads at localhost:3000
+      50 -- [ ] NL search "flights from NYC to London next Friday" → Sear
+         -chAgent returns parsed params                                  
+      51 -- [ ] Search JFK→LHR → 6 mock flights displayed with price/dura
+         -tion                                                           
+      56 +- [ ] Register + login with email/password works               
+      57 +- [ ] Google SSO redirects and authenticates correctly         
+      58 +- [ ] NL search "flights from NYC to London next Friday" → Sear
+         +chAgent returns parsed params, form auto-fills                 
+      59 +- [ ] Search JFK→LHR → mock flights displayed with price/durati
+         +on/stops                                                       
+      60  - [ ] Select flight → seat map renders with economy/business/fi
+          rst zones
+      61  - [ ] Fill passengers → checkout shows correct price breakdown
+      54 -- [ ] Submit checkout → confirmation page with booking referenc
+         -e                                                              
+      62 +- [ ] Submit checkout → confirmation page with booking referenc
+         +e + PNR                                                        
+      63  - [ ] ClaudeAssistant responds to "what's the baggage policy?"
+      64  - [ ] New airline adapter registers and overrides branding/colo
+          rs
+      65 +- [ ] Page refresh during booking restores state from localStor
+         +age                                                            
+
+⏺ Both files updated. Here's a summary of changes:
+
+  design.md
+  - File tree updated: added auth.ts, app/providers.tsx, app/login/,
+  app/register/, app/search/SearchForm.tsx, corrected results path to
+  search/results/; removed non-existent components/PassengerForm.tsx
+  - AirlineAdapter interface source corrected to types/airline.ts
+  - Agent section: added AgentContext interface definition, buildSystemPrompt
+  interpolation detail, SearchAgent note about client stripping code fences
+  - AgentOrchestrator signature updated to include context param; added dynamic
+  import note
+  - New Authentication section covering NextAuth setup, providers, env vars,
+  SessionProvider wiring
+  - BookingState: adapter is non-null (defaults to MockAdapter), booking renamed
+   to confirmation
+
+  tasks.md
+  - All Phase 1–6 tasks marked [x] (done)
+  - Phase 4 (auth) added as new phase; original phases 4–6 renumbered to 5–7
+  - T6.3 added for SearchForm.tsx (was missing)
+  - T6.4 corrected path to search/results/page.tsx
+  - Verification checklist expanded: auth flows, NL form auto-fill, PNR,
+  localStorage restore
+
+✻ Brewed for 1m 40s
+
+❯ ok now i want the ui change to add multiple dates as traveller can book both  
+sides flights and also how many people adults or kids                           
+
+⏺ Let me look at the current search form and home page first.
+
+  Read 2 files (ctrl+o to expand)
+⏺ Good — SearchParams already has tripType, returnDate, and the full passengers
+  object. I just need to wire up the UI. Let me update the SearchForm:
+
+⏺ Write(app/search/SearchForm.tsx)
+  ⎿  Added 148 lines, removed 11 lines
+        1  'use client';
+        2  
+        3 -import { useState } from 'react';                             
+        3 +import { useState, useRef, useEffect } from 'react';          
+        4  import { useRouter } from 'next/navigation';
+        5 -import { Search, Sparkles } from 'lucide-react';              
+        5 +import { Search, Sparkles, Users, ChevronDown } from 'lucide-r
+          +eact';                                                        
+        6  import { AIRPORTS } from '@/utils/mockData';
+        7  import { useBooking } from '@/utils/bookingStore';
+        8  import type { SearchParams, CabinClass } from '@/types/flight'
+           ;
+        9  
+       10 +function PassengerPicker({                                    
+       11 +  passengers,                                                 
+       12 +  onChange,                                                   
+       13 +}: {                                                          
+       14 +  passengers: SearchParams['passengers'];                     
+       15 +  onChange: (p: SearchParams['passengers']) => void;          
+       16 +}) {                                                          
+       17 +  const [open, setOpen] = useState(false);                    
+       18 +  const ref = useRef<HTMLDivElement>(null);                   
+       19 +                                                              
+       20 +  useEffect(() => {                                           
+       21 +    function handleClick(e: MouseEvent) {                     
+       22 +      if (ref.current && !ref.current.contains(e.target as Nod
+          +e)) setOpen(false);                                           
+       23 +    }                                                         
+       24 +    document.addEventListener('mousedown', handleClick);      
+       25 +    return () => document.removeEventListener('mousedown', han
+          +dleClick);                                                    
+       26 +  }, []);                                                     
+       27 +                                                              
+       28 +  const total = passengers.adults + passengers.children + pass
+          +engers.infants;                                               
+       29 +                                                              
+       30 +  const adjust = (key: keyof typeof passengers, delta: number)
+          + => {                                                         
+       31 +    const next = { ...passengers, [key]: Math.max(key === 'adu
+          +lts' ? 1 : 0, passengers[key] + delta) };                     
+       32 +    // infants cannot exceed adults                           
+       33 +    if (next.infants > next.adults) next.infants = next.adults
+          +;                                                             
+       34 +    onChange(next);                                           
+       35 +  };                                                          
+       36 +                                                              
+       37 +  const rows: { key: keyof typeof passengers; label: string; s
+          +ub: string; min: number }[] = [                               
+       38 +    { key: 'adults', label: 'Adults', sub: 'Age 12+', min: 1 }
+          +,                                                             
+       39 +    { key: 'children', label: 'Children', sub: 'Age 2–11', min
+          +: 0 },                                                        
+       40 +    { key: 'infants', label: 'Infants', sub: 'Under 2', min: 0
+          + },                                                           
+       41 +  ];                                                          
+       42 +                                                              
+       43 +  return (                                                    
+       44 +    <div ref={ref} className="relative">                      
+       45 +      <button                                                 
+       46 +        type="button"                                         
+       47 +        onClick={() => setOpen((o) => !o)}                    
+       48 +        className="w-full flex items-center justify-between ga
+          +p-2 px-3 py-2 rounded-lg border border-gray-200 text-sm focus:
+          +outline-none focus:border-blue-400 bg-white"                  
+       49 +      >                                                       
+       50 +        <span className="flex items-center gap-1.5 text-gray-7
+          +00">                                                          
+       51 +          <Users size={14} className="text-gray-400" />       
+       52 +          {total} passenger{total !== 1 ? 's' : ''}           
+       53 +        </span>                                               
+       54 +        <ChevronDown size={14} className={`text-gray-400 trans
+          +ition-transform ${open ? 'rotate-180' : ''}`} />              
+       55 +      </button>                                               
+       56 +                                                              
+       57 +      {open && (                                              
+       58 +        <div className="absolute z-20 top-full mt-1 left-0 w-6
+          +4 bg-white border border-gray-200 rounded-xl shadow-lg p-4 spa
+          +ce-y-4">                                                      
+       59 +          {rows.map(({ key, label, sub, min }) => (           
+       60 +            <div key={key} className="flex items-center justif
+          +y-between">                                                   
+       61 +              <div>                                           
+       62 +                <p className="text-sm font-medium text-gray-80
+          +0">{label}</p>                                                
+       63 +                <p className="text-xs text-gray-400">{sub}</p>
+       64 +              </div>                                          
+       65 +              <div className="flex items-center gap-3">       
+       66 +                <button                                       
+       67 +                  type="button"                               
+       68 +                  onClick={() => adjust(key, -1)}             
+       69 +                  disabled={passengers[key] <= min}           
+       70 +                  className="w-7 h-7 rounded-full border borde
+          +r-gray-200 text-gray-600 flex items-center justify-center text
+          +-base leading-none hover:bg-gray-50 disabled:opacity-30"      
+       71 +                >                                             
+       72 +                  −                                           
+       73 +                </button>                                     
+       74 +                <span className="w-4 text-center text-sm font-
+          +medium text-gray-800">{passengers[key]}</span>                
+       75 +                <button                                       
+       76 +                  type="button"                               
+       77 +                  onClick={() => adjust(key, 1)}              
+       78 +                  className="w-7 h-7 rounded-full border borde
+          +r-gray-200 text-gray-600 flex items-center justify-center text
+          +-base leading-none hover:bg-gray-50"                          
+       79 +                >                                             
+       80 +                  +                                           
+       81 +                </button>                                     
+       82 +              </div>                                          
+       83 +            </div>                                            
+       84 +          ))}                                                 
+       85 +          <button                                             
+       86 +            type="button"                                     
+       87 +            onClick={() => setOpen(false)}                    
+       88 +            className="w-full py-1.5 text-sm font-medium text-
+          +blue-600 hover:text-blue-700"                                 
+       89 +          >                                                   
+       90 +            Done                                              
+       91 +          </button>                                           
+       92 +        </div>                                                
+       93 +      )}                                                      
+       94 +    </div>                                                    
+       95 +  );                                                          
+       96 +}                                                             
+       97 +                                                              
+       98  export function SearchForm() {
+       99    const router = useRouter();
+      100    const { setSearchParams } = useBooking();
+     ...
+      105      origin: null,
+      106      destination: null,
+      107      departureDate: '',
+      108 +    returnDate: '',                                           
+      109      passengers: { adults: 1, children: 0, infants: 0 },
+      110      class: 'economy',
+      111      tripType: 'oneWay',
+      112    });
+      113  
+      114 +  const isRoundTrip = form.tripType === 'roundTrip';          
+      115 +                                                              
+      116    const handleNlSearch = async () => {
+      117      if (!nlQuery.trim()) return;
+      118      setNlLoading(true);
+     ...
+      127        const { result, error } = await res.json();
+      128        if (error) throw new Error(error);
+      129  
+       39 -      // Strip markdown code fences Claude sometimes adds     
+      130        const json = result.replace(/^```(?:json)?\s*/i, '').rep
+           lace(/\s*```$/, '').trim();
+      131        const parsed = JSON.parse(json);
+      132  
+     ...
+      135          origin: AIRPORTS.find((a) => a.code === parsed.origin?
+           .code) ?? prev.origin,
+      136          destination: AIRPORTS.find((a) => a.code === parsed.de
+           stination?.code) ?? prev.destination,
+      137          departureDate: parsed.departureDate ?? prev.departureD
+           ate,
+      138 +        returnDate: parsed.returnDate ?? prev.returnDate,     
+      139          passengers: parsed.passengers ?? prev.passengers,
+      140          class: (parsed.class as CabinClass) ?? prev.class,
+      141          tripType: parsed.tripType ?? prev.tripType,
+     ...
+      150    const handleSubmit = (e: React.FormEvent) => {
+      151      e.preventDefault();
+      152      if (!form.origin || !form.destination || !form.departureDa
+           te) return;
+       62 -    setSearchParams(form);                                    
+      153 +    if (isRoundTrip && !form.returnDate) return;              
+      154 +    const params = { ...form };                               
+      155 +    if (!isRoundTrip) delete params.returnDate;               
+      156 +    setSearchParams(params);                                  
+      157      router.push('/search/results');
+      158    };
+      159  
+      160 +  const canSubmit =                                           
+      161 +    !!form.origin && !!form.destination && !!form.departureDat
+          +e && (!isRoundTrip || !!form.returnDate);                     
+      162 +                                                              
+      163    return (
+      164      <form onSubmit={handleSubmit} className="space-y-4">
+      165        {/* NL search bar */}
+      166        <div className="flex gap-2">
+      167          <input
+      168            className="flex-1 px-4 py-2.5 rounded-xl border bord
+           er-gray-200 text-sm focus:outline-none focus:border-blue-400"
+       72 -          placeholder='Try: "cheap flights NYC to London next 
+          -Friday business class"'                                       
+      169 +          placeholder='Try: "return flights NYC to London next
+          + Friday, 2 adults 1 child"'                                   
+      170            value={nlQuery}
+      171            onChange={(e) => setNlQuery(e.target.value)}
+      172            onKeyDown={(e) => e.key === 'Enter' && (e.preventDef
+           ault(), handleNlSearch())}
+     ...
+      182          </button>
+      183        </div>
+      184  
+       88 -      {nlError && (                                           
+       89 -        <p className="text-sm text-red-600 -mt-2">{nlError}</p
+          ->                                                             
+       90 -      )}                                                      
+      185 +      {nlError && <p className="text-sm text-red-600 -mt-2">{n
+          +lError}</p>}                                                  
+      186  
+      187 +      {/* Trip type toggle */}                                
+      188 +      <div className="flex gap-1 p-1 bg-gray-100 rounded-lg w-
+          +fit">                                                         
+      189 +        {(['oneWay', 'roundTrip'] as const).map((type) => (   
+      190 +          <button                                             
+      191 +            key={type}                                        
+      192 +            type="button"                                     
+      193 +            onClick={() => setForm((p) => ({ ...p, tripType: t
+          +ype, returnDate: '' }))}                                      
+      194 +            className={`px-4 py-1.5 rounded-md text-sm font-me
+          +dium transition-colors ${                                     
+      195 +              form.tripType === type                          
+      196 +                ? 'bg-white text-gray-900 shadow-sm'          
+      197 +                : 'text-gray-500 hover:text-gray-700'         
+      198 +            }`}                                               
+      199 +          >                                                   
+      200 +            {type === 'oneWay' ? 'One Way' : 'Round Trip'}    
+      201 +          </button>                                           
+      202 +        ))}                                                   
+      203 +      </div>                                                  
+      204 +                                                              
+      205        <div className="border-t border-gray-100 pt-4 grid grid-
+           cols-2 gap-3">
+      206          {/* Origin */}
+      207          <div>
+     ...
+      229            </select>
+      230          </div>
+      231  
+      119 -        {/* Date */}                                          
+      232 +        {/* Departure date */}                                
+      233          <div>
+      234            <label className="block text-xs font-medium text-gra
+           y-500 mb-1">Departure</label>
+      235            <input
+     ...
+      240            />
+      241          </div>
+      242  
+      243 +        {/* Return date — only when round trip */}            
+      244 +        <div>                                                 
+      245 +          <label className="block text-xs font-medium text-gra
+          +y-500 mb-1">                                                  
+      246 +            Return {!isRoundTrip && <span className="text-gray
+          +-300">(one way)</span>}                                       
+      247 +          </label>                                            
+      248 +          <input                                              
+      249 +            type="date"                                       
+      250 +            disabled={!isRoundTrip}                           
+      251 +            min={form.departureDate || undefined}             
+      252 +            className="w-full px-3 py-2 rounded-lg border bord
+          +er-gray-200 text-sm focus:outline-none focus:border-blue-400 d
+          +isabled:bg-gray-50 disabled:text-gray-300"                    
+      253 +            value={form.returnDate ?? ''}                     
+      254 +            onChange={(e) => setForm((p) => ({ ...p, returnDat
+          +e: e.target.value }))}                                        
+      255 +          />                                                  
+      256 +        </div>                                                
+      257 +                                                              
+      258 +        {/* Passengers */}                                    
+      259 +        <div>                                                 
+      260 +          <label className="block text-xs font-medium text-gra
+          +y-500 mb-1">Passengers</label>                                
+      261 +          <PassengerPicker                                    
+      262 +            passengers={form.passengers}                      
+      263 +            onChange={(passengers) => setForm((p) => ({ ...p, 
+          +passengers }))}                                               
+      264 +          />                                                  
+      265 +        </div>                                                
+      266 +                                                              
+      267          {/* Cabin class */}
+      268          <div>
+      269            <label className="block text-xs font-medium text-gra
+           y-500 mb-1">Class</label>
+      270            <select
+      134 -            className="w-full px-3 py-2 rounded-lg border bord
+          -er-gray-200 text-sm focus:outline-none focus:border-blue-400" 
+      271 +            className="w-full px-3 py2 rounded-lg border borde
+          +r-gray-200 text-sm focus:outline-none focus:border-blue-400"  
+      272              value={form.class}
+      273              onChange={(e) => setForm((p) => ({ ...p, class: e.
+           target.value as CabinClass }))}
+      274            >
+     ...
+      281  
+      282        <button
+      283          type="submit"
+      147 -        disabled={!form.origin || !form.destination || !form.d
+          -epartureDate}                                                 
+      284 +        disabled={!canSubmit}                                 
+      285          className="w-full flex items-center justify-center gap
+           -2 py-3 bg-blue-600 text-white font-medium rounded-xl hover:bg
+           -blue-700 disabled:opacity-40 transition-colors"
+      286        >
+      287          <Search size={16} />
+
+⏺ Now update the results page to show the full passenger breakdown and return
+  date when applicable:
+
+⏺ Update(app/search/results/page.tsx)
+  ⎿  Added 10 lines, removed 1 line
+      46        <div className="mb-6">
+      47          <h2 className="text-xl font-bold text-gray-900">
+      48            {searchParams?.origin?.city} → {searchParams?.destina
+          tion?.city}
+      49 +          {searchParams?.tripType === 'roundTrip' && ' (Return)
+         +'}                                                             
+      50          </h2>
+      51          <p className="text-sm text-gray-500">
+      51 -          {searchParams?.departureDate} · {searchParams?.passen
+         -gers.adults} adult · {searchParams?.class}                     
+      52 +          {searchParams?.departureDate}                        
+      53 +          {searchParams?.tripType === 'roundTrip' && searchPara
+         +ms?.returnDate && ` → ${searchParams.returnDate}`}             
+      54 +          {' · '}                                              
+      55 +          {[                                                   
+      56 +            searchParams?.passengers.adults && `${searchParams.
+         +passengers.adults} adult${searchParams.passengers.adults !== 1 
+         +? 's' : ''}`,                                                  
+      57 +            searchParams?.passengers.children ? `${searchParams
+         +.passengers.children} child${searchParams.passengers.children !
+         +== 1 ? 'ren' : ''}` : null,                                    
+      58 +            searchParams?.passengers.infants ? `${searchParams.
+         +passengers.infants} infant${searchParams.passengers.infants !==
+         + 1 ? 's' : ''}` : null,                                        
+      59 +          ].filter(Boolean).join(', ')}                        
+      60 +          {' · '}{searchParams?.class}                         
+      61          </p>
+      62        </div>
+      63  
+
+⏺ Also fix a typo I noticed in the class select (missing space in py2):
+
+⏺ Update(app/search/SearchForm.tsx)
+  ⎿  Added 1 line, removed 1 line
+      268          <div>
+      269            <label className="block text-xs font-medium text-gra
+           y-500 mb-1">Class</label>
+      270            <select
+      271 -            className="w-full px-3 py2 rounded-lg border borde
+          -r-gray-200 text-sm focus:outline-none focus:border-blue-400"  
+      271 +            className="w-full px-3 py-2 rounded-lg border bord
+          +er-gray-200 text-sm focus:outline-none focus:border-blue-400" 
+      272              value={form.class}
+      273              onChange={(e) => setForm((p) => ({ ...p, class: e.
+           target.value as CabinClass }))}
+      274            >
+
+⏺ Done. Here's what changed:
+
+  SearchForm (app/search/SearchForm.tsx)
+  - Trip type toggle — pill-style "One Way / Round Trip" switcher at the top;
+  switching to one-way clears the return date
+  - Return date field — always visible in the grid but disabled (grayed out) for
+   one-way; enforces min = departure date to prevent selecting a return before
+  departure
+  - Passenger picker — dropdown popover with ＋/− counters for Adults (min 1),
+  Children, and Infants; infants are capped at the number of adults; shows total
+   like "3 passengers" in the trigger
+  - Submit guard — round-trip requires a return date before the search button
+  enables
+  - NL search placeholder updated to hint at round-trip + passenger examples
+
+  Results page (app/search/results/page.tsx)
+  - Header now shows "(Return)" for round trips
+  - Date line shows departure → return for round trips
+  - Passenger line shows the full breakdown: "2 adults, 1 child, 1 infant"
+  instead of just adult count
+
+✻ Crunched for 1m 25s
+
+❯ update the search feature change in the requirement, design and task files    
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Now I have everything I need. All three files need targeted updates to FR2 /
+  the search section.
+
+⏺ Update(.claude/specs/requirements.md)
+  ⎿  Added 7 lines, removed 3 lines
+      15  - Branding (`BrandConfig`: name, logo, primaryColor, secondaryC
+          olor, fontFamily) is configurable per adapter
+      16  
+      17  ### FR2 — Flight Search
+      18 -- Users can search by origin, destination, departure date, pass
+         -engers (adults/children/infants), and cabin class              
+      19 -- Trip type: one-way or round-trip; round-trip includes a retur
+         -n date field                                                   
+      20 -- Claude SearchAgent translates natural language queries into s
+         -tructured `SearchParams`                                       
+      18 +- Users can search by origin, destination, departure date, pass
+         +engers, and cabin class via a structured form or natural langua
+         +ge                                                             
+      19 +- **Trip type toggle**: One Way or Round Trip; switching to one
+         +-way clears and disables the return date field                 
+      20 +- **Return date**: shown for round trips; enforces a minimum eq
+         +ual to the departure date; search button is disabled until a re
+         +turn date is provided for round-trip searches                  
+      21 +- **Passenger picker**: dropdown popover with ＋/− counters for
+         + Adults (min 1), Children (age 2–11, min 0), and Infants (under
+         + 2, min 0); infants are capped at the number of adults; trigger
+         + shows total passenger count (e.g. "3 passengers")             
+      22 +- **Cabin class**: Economy, Business, First Class              
+      23 +- Claude SearchAgent translates natural language into structure
+         +d `SearchParams` (including trip type, return date, and passeng
+         +er breakdown); client strips markdown code fences before parsin
+         +g the JSON response                                            
+      24 +- Results page header shows origin → destination with "(Return)
+         +" label for round trips; subtitle shows departure → return date
+         +s and full passenger breakdown (e.g. "2 adults, 1 child")      
+      25  - Results are filterable by: price, duration, stops, airline, d
+          eparture time
+      26  - Results display: airline, flight number, times, duration, sto
+          ps, price per class
+      27  - Flights are multi-segment (`FlightSegment[]`) to support conn
+          ecting itineraries
+
+⏺ Update(.claude/specs/design.md)
+  ⎿  Added 2 lines, removed 2 lines
+      126  System prompts support `{airline}` interpolation via `buildSys
+           temPrompt(context)` — replaced with `context.airlineName` at c
+           all time.
+      127  
+      128  ### SearchAgent
+      129 -- System prompt: extracts origin, destination, date, passenger
+          -s, and cabin class from natural language. Returns `SearchParam
+          -s` JSON.                                                      
+      130 -- Input: natural language string                              
+      129 +- System prompt: extracts origin, destination, departure date,
+          + return date, trip type, passengers (adults/children/infants),
+          + and cabin class from natural language. Returns `SearchParams`
+          + JSON.                                                        
+      130 +- Input: natural language string (e.g. "return flights NYC to 
+          +London next Friday, 2 adults 1 child business class")         
+      131  - Output: `SearchParams` JSON (client strips markdown code fen
+           ces before parsing)
+      132  
+      133  ### RecommendationAgent
+
+⏺ Update(.claude/specs/design.md)
+  ⎿  Added 2 lines, removed 2 lines
+      50  │   ├── login/page.tsx           # Sign-in: email/password + Go
+          ogle SSO
+      51  │   ├── register/page.tsx        # Registration form
+      52  │   ├── search/
+      53 -│   │   ├── SearchForm.tsx       # Search form component (NL + 
+         -structured fields)                                             
+      54 -│   │   └── results/page.tsx     # Flight results with filters 
+         -sidebar                                                        
+      53 +│   │   ├── SearchForm.tsx       # Search form: NL bar, trip ty
+         +pe toggle, date fields, PassengerPicker, cabin class           
+      54 +│   │   └── results/page.tsx     # Flight results; header shows
+         + trip type, dates, full passenger breakdown                    
+      55  │   ├── booking/
+      56  │   │   ├── seats/page.tsx       # Seat map selection
+      57  │   │   ├── passengers/page.tsx  # Passenger + contact form
+
+⏺ Now add a dedicated search UI section to the design file and update tasks:
+
+⏺ Update(.claude/specs/design.md)
+  ⎿  Added 22 lines
+      203  
+      204  ---
+      205  
+      206 +## Search Form UI                                             
+      207 +                                                              
+      208 +`app/search/SearchForm.tsx` contains two components:          
+      209 +                                                              
+      210 +### `PassengerPicker`                                         
+      211 +A self-contained dropdown popover (click-outside aware via `us
+          +eRef` + `mousedown` listener) with ＋/− counters for:         
+      212 +- **Adults** (age 12+, min 1)                                 
+      213 +- **Children** (age 2–11, min 0)                              
+      214 +- **Infants** (under 2, min 0 — capped at adult count)        
+      215 +                                                              
+      216 +Trigger button shows total (e.g. "3 passengers"). A "Done" but
+          +ton closes the popover.                                       
+      217 +                                                              
+      218 +### `SearchForm`                                              
+      219 +Layout: NL bar → trip type toggle → 2×3 grid (origin, destinat
+          +ion, departure, return, passengers, class) → search button.   
+      220 +                                                              
+      221 +- **Trip type toggle**: pill switcher ("One Way" / "Round Trip
+          +"); toggling to one-way resets `returnDate` to `''`           
+      222 +- **Return date**: always rendered in the grid; `disabled` whe
+          +n one-way; `min` attribute set to `departureDate` to prevent i
+          +nvalid ranges                                                 
+      223 +- **Submit guard** (`canSubmit`): requires origin, destination
+          +, departure date, and — for round trips — a return date; butto
+          +n is `disabled` otherwise                                     
+      224 +- **NL auto-fill**: SearchAgent response is parsed and merged 
+          +into form state, including `tripType` and `returnDate`        
+      225 +                                                              
+      226 +---                                                           
+      227 +                                                              
+      228  ## Claude API Proxy
+      229  
+      230  `/api/claude` accepts the full Anthropic messages payload and 
+           proxies it, keeping the API key server-side.
+
+⏺ Update(.claude/specs/tasks.md)
+  ⎿  Added 2 lines, removed 2 lines
+      40  ## Phase 6: Pages
+      41  - [x] T6.1 Update `app/layout.tsx` — SessionProvider + BookingP
+          rovider + Navbar + theme CSS vars
+      42  - [x] T6.2 Build `app/page.tsx` — SearchForm + Claude NL search
+           bar
+      43 -- [x] T6.3 Build `app/search/SearchForm.tsx` — structured form 
+         -+ AI search via `/api/agents`                                  
+      44 -- [x] T6.4 Build `app/search/results/page.tsx` — flight results
+         - + filters                                                     
+      43 +- [x] T6.3 Build `app/search/SearchForm.tsx` — NL bar, One Way/
+         +Round Trip toggle, departure + return date fields, PassengerPic
+         +ker popover (adults/children/infants with ＋/− counters), cabin
+         + class, submit guard                                           
+      44 +- [x] T6.4 Build `app/search/results/page.tsx` — flight results
+         + + filters; subtitle shows trip type, date range, and full pass
+         +enger breakdown                                                
+      45  - [x] T6.5 Build `app/booking/seats/page.tsx` — seat map select
+          ion
+      46  - [x] T6.6 Build `app/booking/passengers/page.tsx` — passenger 
+          + contact form
+      47  - [x] T6.7 Build `app/booking/checkout/page.tsx` — price summar
+          y + mock payment
+
+⏺ Also update the verification checklist in tasks to cover the new search
+  behaviour:
+
+⏺ Update(.claude/specs/tasks.md)
+  ⎿  Added 5 lines, removed 1 line
+      55  - [ ] `npm run dev` — loads at localhost:3000
+      56  - [ ] Register + login with email/password works
+      57  - [ ] Google SSO redirects and authenticates correctly
+      58 -- [ ] NL search "flights from NYC to London next Friday" → Sear
+         -chAgent returns parsed params, form auto-fills                 
+      58 +- [ ] One Way / Round Trip toggle shows/hides return date corre
+         +ctly; switching to one-way clears return date                  
+      59 +- [ ] Return date picker enforces min = departure date; search 
+         +button disabled until return date is filled for round trips    
+      60 +- [ ] PassengerPicker: Adults min 1, Infants capped at adult co
+         +unt, trigger shows total count                                 
+      61 +- [ ] NL search "return flights NYC to London next Friday, 2 ad
+         +ults 1 child" → form auto-fills trip type, dates, and passenger
+         + counts                                                        
+      62  - [ ] Search JFK→LHR → mock flights displayed with price/durati
+          on/stops
+      63 +- [ ] Results subtitle shows correct date range and passenger b
+         +reakdown for both trip types                                   
+      64  - [ ] Select flight → seat map renders with economy/business/fi
+          rst zones
+      65  - [ ] Fill passengers → checkout shows correct price breakdown
+      66  - [ ] Submit checkout → confirmation page with booking referenc
+          e + PNR
+
+⏺ All three files updated. Summary of what changed in each:
+
+  requirements.md (FR2)
+  - Expanded into bullet points for trip type toggle, return date behaviour,
+  passenger picker (with age brackets and infant cap rule), submit guard, and
+  results page display
+
+  design.md
+  - File tree comments updated for SearchForm.tsx and results/page.tsx
+  - SearchAgent input example updated to include round-trip + passenger NL query
+  - New Search Form UI section documenting PassengerPicker and SearchForm
+  component behaviour (toggle logic, submit guard, NL auto-fill, return date min
+   constraint)
+
+  tasks.md
+  - T6.3 and T6.4 descriptions expanded to match implementation
+  - Verification checklist: 4 new items covering toggle, return date guard,
+  passenger picker rules, and results subtitle
+
+✻ Cogitated for 57s
+
+❯ ok now can we add unit test cases for all the features with code coverage and 
+ integration tests                                                              
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+⏺ No testing setup at all. Let me read the remaining key files before writing
+  tests.
+
+  Read 10 files (ctrl+o to expand)
+
+⏺ Now I have a complete picture. Let me set everything up — config, all unit
+  tests, and integration tests.
+
+⏺ Bash(npm install --save-dev jest jest-environment-jsdom @testing-library/react
+       @testing-library/jest-dom @testing-library/user-event @types/jest 2>&1 |
+      tail -5)  ⎿  To address all issues (including breaking changes), run:
+       npm audit fix --force
+
+     Run `npm audit` for details.
+
+⏺ Write(jest.config.js)
+  ⎿  Wrote 30 lines to jest.config.js
+       1 const nextJest = require('next/jest');
+       2 
+       3 const createJestConfig = nextJest({ dir: './' });
+       4 
+       5 module.exports = createJestConfig({
+       6   setupFilesAfterFramework: ['<rootDir>/jest.setup.ts'],
+       7   testEnvironment: 'jest-environment-jsdom',
+       8   coverageProvider: 'v8',
+       9   collectCoverageFrom: [
+      10     'core/**/*.ts',
+     … +20 lines (ctrl+o to expand)
+
+⏺ Write(jest.setup.ts)
+  ⎿  Wrote 1 lines to jest.setup.ts
+      1 import '@testing-library/jest-dom';
+
+⏺ Now write all the test files in parallel batches:
+
+⏺ Write(__tests__/unit/utils/mockData.test.ts)
+  ⎿  Wrote 117 lines to __tests__/unit/utils/mockData.test.ts
+      1 import { AIRPORTS, AIRLINES, generateMockFlights, generateSeatMap
+         } from '@/utils/mockData';
+      2 
+      3 const JFK = AIRPORTS.find((a) => a.code === 'JFK')!;
+      4 const LHR = AIRPORTS.find((a) => a.code === 'LHR')!;
+      5 
+      6 describe('AIRPORTS', () => {
+      7   it('exports at least one airport', () => {
+      8     expect(AIRPORTS.length).toBeGreaterThan(0);
+      9   });
+     … +107 lines (ctrl+o to expand)
+
+⏺ Write(__tests__/unit/core/adapters/registry.test.ts)
+  ⎿  Wrote 106 lines to __tests__/unit/core/adapters/registry.test.ts
+      1 import type { AirlineAdapter, BrandConfig } from '@/types/airline
+        ';
+      2 
+      3 // Each test gets a fresh registry instance to avoid cross-test s
+        tate
+      4 function makeRegistry() {
+      5   // Re-import to get a fresh module — we do it by constructing m
+        anually
+      6   // since the exported singleton is shared. Test the class behav
+        iour directly.
+      7   class Registry {
+      8     private adapters = new Map<string, AirlineAdapter>();
+      9     private activeId: string | null = null;
+     … +96 lines (ctrl+o to expand)
+
+⏺ Write(__tests__/unit/core/adapters/mock.test.ts)
+  ⎿  Wrote 145 lines to __tests__/unit/core/adapters/mock.test.ts
+       1 import { MockAdapter } from '@/core/adapters/mock';
+       2 import { AIRPORTS } from '@/utils/mockData';
+       3 import type { BookingRequest } from '@/types/booking';
+       4 import type { Flight } from '@/types/flight';
+       5 
+       6 const JFK = AIRPORTS.find((a) => a.code === 'JFK')!;
+       7 const LHR = AIRPORTS.find((a) => a.code === 'LHR')!;
+       8 
+       9 const baseSearchParams = {
+      10   origin: JFK,
+     … +135 lines (ctrl+o to expand)
+
+⏺ Write(__tests__/unit/core/agents/base.test.ts)
+  ⎿  Wrote 74 lines to __tests__/unit/core/agents/base.test.ts
+      1 import { BaseAgent, AgentContext } from '@/core/agents/base';
+      2 
+      3 // Mock the Anthropic SDK
+      4 const mockCreate = jest.fn();
+      5 jest.mock('@anthropic-ai/sdk', () => ({
+      6   default: jest.fn().mockImplementation(() => ({
+      7     messages: { create: mockCreate },
+      8   })),
+      9 }));
+     … +64 lines (ctrl+o to expand)
+
+⏺ Write(__tests__/unit/core/agents/SearchAgent.test.ts)
+  ⎿  Wrote 79 lines to __tests__/unit/core/agents/SearchAgent.test.ts
+       1 const mockCreate = jest.fn();
+       2 jest.mock('@anthropic-ai/sdk', () => ({
+       3   default: jest.fn().mockImplementation(() => ({
+       4     messages: { create: mockCreate },
+       5   })),
+       6 }));
+       7 
+       8 import { SearchAgent } from '@/core/agents/SearchAgent';
+       9 
+      10 describe('SearchAgent', () => {
+     … +69 lines (ctrl+o to expand)
+
+⏺ Write(__tests__/unit/core/agents/other-agents.test.ts)
+  ⎿  Wrote 76 lines to __tests__/unit/core/agents/other-agents.test.ts
+       1 const mockCreate = jest.fn();
+       2 jest.mock('@anthropic-ai/sdk', () => ({
+       3   default: jest.fn().mockImplementation(() => ({
+       4     messages: { create: mockCreate },
+       5   })),
+       6 }));
+       7 
+       8 import { RecommendationAgent } from '@/core/agents/Recommendatio
+         nAgent';
+       9 import { SupportAgent } from '@/core/agents/SupportAgent';
+      10 import { DisruptionAgent } from '@/core/agents/DisruptionAgent';
+     … +66 lines (ctrl+o to expand)
+
+⏺ Write(__tests__/unit/core/orchestrator.test.ts)
+  ⎿  Wrote 57 lines to __tests__/unit/core/orchestrator.test.ts
+       1 const mockCreate = jest.fn();
+       2 jest.mock('@anthropic-ai/sdk', () => ({
+       3   default: jest.fn().mockImplementation(() => ({
+       4     messages: { create: mockCreate },
+       5   })),
+       6 }));
+       7 
+       8 import { AgentOrchestrator } from '@/core/orchestrator';
+       9 
+      10 beforeEach(() => {
+     … +47 lines (ctrl+o to expand)
+
+⏺ Write(__tests__/unit/components/FlightCard.test.tsx)
+  ⎿  Wrote 92 lines to __tests__/unit/components/FlightCard.test.tsx
+       1 import { render, screen, fireEvent } from '@testing-library/reac
+         t';
+       2 import { FlightCard } from '@/components/FlightCard';
+       3 import type { Flight } from '@/types/flight';
+       4 
+       5 const mockFlight: Flight = {
+       6   id: 'flight_0',
+       7   segments: [
+       8     {
+       9       id: 'seg_0',
+      10       airline: { code: 'BA', name: 'British Airways', logo: '🇬🇧'
+          },
+     … +82 lines (ctrl+o to expand)
+
+⏺ Write(__tests__/unit/components/SeatMap.test.tsx)
+  ⎿  Wrote 84 lines to __tests__/unit/components/SeatMap.test.tsx
+       1 import { render, screen, fireEvent } from '@testing-library/reac
+         t';
+       2 import { SeatMap } from '@/components/SeatMap';
+       3 import type { Seat } from '@/types/flight';
+       4 
+       5 function makeSeat(overrides: Partial<Seat> = {}): Seat {
+       6   return {
+       7     id: '1A',
+       8     row: 1,
+       9     letter: 'A',
+      10     type: 'window',
+     … +74 lines (ctrl+o to expand)
+
+⏺ Write(__tests__/unit/search/SearchForm.test.tsx)
+  ⎿  Wrote 232 lines to __tests__/unit/search/SearchForm.test.tsx
+      1 import { render, screen, fireEvent, waitFor, act } from '@testing
+        -library/react';
+      2 import userEvent from '@testing-library/user-event';
+      3 import { SearchForm } from '@/app/search/SearchForm';
+      4 
+      5 // Mock next/navigation
+      6 const mockPush = jest.fn();
+      7 jest.mock('next/navigation', () => ({
+      8   useRouter: () => ({ push: mockPush }),
+      9 }));
+     … +222 lines (ctrl+o to expand)
+
+⏺ Now the integration tests:
+
+⏺ Write(__tests__/integration/api/flights.test.ts)
+  ⎿  Wrote 86 lines to __tests__/integration/api/flights.test.ts
+      1 /**
+      2  * @jest-environment node
+      3  */
+      4 import { NextRequest } from 'next/server';
+      5 import { POST } from '@/app/api/flights/route';
+      6 import { AIRPORTS } from '@/utils/mockData';
+      7 
+      8 const JFK = AIRPORTS.find((a) => a.code === 'JFK')!;
+      9 const LHR = AIRPORTS.find((a) => a.code === 'LHR')!;
+     … +76 lines (ctrl+o to expand)
+
+⏺ Write(__tests__/integration/api/agents.test.ts)
+  ⎿  Wrote 81 lines to __tests__/integration/api/agents.test.ts
+      1 /**
+      2  * @jest-environment node
+      3  */
+      4 const mockCreate = jest.fn();
+      5 jest.mock('@anthropic-ai/sdk', () => ({
+      6   default: jest.fn().mockImplementation(() => ({
+      7     messages: { create: mockCreate },
+      8   })),
+      9 }));
+     … +71 lines (ctrl+o to expand)
+
+⏺ Now fix the jest config (typo setupFilesAfterFramework →
+  setupFilesAfterFramework should be setupFilesAfterFramework — actually it's
+  setupFilesAfterFramework which doesn't exist, the correct key is
+  setupFilesAfterFramework — wait, it's setupFilesAfterFramework no... it's
+  actually setupFilesAfterFramework → correct key is setupFilesAfterFramework...
+   Let me check):
+
+⏺ Update(jest.config.js)
+  ⎿  Added 1 line, removed 1 line
+      26    moduleNameMapper: {
+      27      '^@/(.*)$': '<rootDir>/$1',
+      28    },
+      29 -  testPathPattern: ['<rootDir>/__tests__'],                    
+      29 +  testMatch: ['<rootDir>/__tests__/**/*.test.{ts,tsx}'],       
+      30  });
+
+⏺ Update(jest.config.js)
+  ⎿  Error editing file
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Update(jest.config.js)
+  ⎿  Added 3 lines
+       4  
+       5  module.exports = createJestConfig({
+       6    setupFilesAfterFramework: ['<rootDir>/jest.setup.ts'],
+       7 +  // Note: next/jest ignores unknown keys; the correct key belo
+         +w is used by jest directly:                                    
+       8 +  setupFilesAfterFramework: undefined,                         
+       9 +  setupFilesAfterFramework: ['<rootDir>/jest.setup.ts'],       
+      10    testEnvironment: 'jest-environment-jsdom',
+      11    coverageProvider: 'v8',
+      12    collectCoverageFrom: [
+⏺ I need to fix the jest config — the correct key is setupFilesAfterEnv, not
+  setupFilesAfterFramework. Let me rewrite it cleanly:
+
+⏺ Write(jest.config.js)
+  ⎿  Added 1 line, removed 4 lines
+       3  const createJestConfig = nextJest({ dir: './' });
+       4  
+       5  module.exports = createJestConfig({
+       6 -  setupFilesAfterFramework: ['<rootDir>/jest.setup.ts'],       
+       7 -  // Note: next/jest ignores unknown keys; the correct key belo
+         -w is used by jest directly:                                    
+       8 -  setupFilesAfterFramework: undefined,                         
+       9 -  setupFilesAfterFramework: ['<rootDir>/jest.setup.ts'],       
+       6 +  setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],             
+       7    testEnvironment: 'jest-environment-jsdom',
+       8    coverageProvider: 'v8',
+       9    collectCoverageFrom: [
+
+⏺ Now add the test scripts to package.json:
+
+⏺ Update(package.json)
+  ⎿  Added 4 lines, removed 1 line
+       6      "dev": "next dev",
+       7      "build": "next build",
+       8      "start": "next start",
+       9 -    "lint": "next lint"                                        
+       9 +    "lint": "next lint",                                       
+      10 +    "test": "jest",                                            
+      11 +    "test:watch": "jest --watch",                              
+      12 +    "test:coverage": "jest --coverage"                         
+      13    },
+      14    "dependencies": {
+      15      "@anthropic-ai/sdk": "^0.82.0",
+
+⏺ Now do a quick smoke-run to check the config loads correctly:
+
+⏺ Bash(npx jest --listTests 2>&1)
+  ⎿  npm warn cli npm v11.11.1 does not support Node.js v22.8.0. This versi
+     on of npm supports the following node versions: `^20.17.0 || >=22.9.0`
+     . You can find the latest version at https://nodejs.org/.
+     … +25 lines (ctrl+o to expand)
+
+⏺ All 12 test files discovered. Fix the typo:
+
+⏺ Update(jest.config.js)
+  ⎿  Added 1 line, removed 1 line
+      15      '!**/*.d.ts',
+      16      '!**/node_modules/**',
+      17    ],
+      18 -  coverageThresholds: {                                        
+      18 +  coverageThreshold: {                                         
+      19      global: {
+      20        branches: 70,
+      21        functions: 80,
+
+⏺ Now run the tests:
+
+⏺ Bash(npx jest --no-coverage 2>&1)
+  ⎿  Error: Exit code 1
+     npm warn cli npm v11.11.1 does not support Node.js v22.8.0. This version of
+      npm supports the following node versions: `^20.17.0 || >=22.9.0`. You can 
+     find the latest version at https://nodejs.org/.
+     FAIL __tests__/unit/core/agents/SearchAgent.test.ts
+       ● Test suite failed to run
+
+         TypeError: _sdk.default is not a constructor
+
+           1 | import Anthropic from '@anthropic-ai/sdk';
+           2 |
+         > 3 | const anthropic = new Anthropic({ apiKey: 
+     process.env.ANTHROPIC_API_KEY });
+     … +228 lines (ctrl+o to see all)
+
+⏺ Two issues to fix:
+  1. Anthropic SDK mock needs __esModule: true for the default export to work as
+   a constructor
+  2. SearchForm labels aren't associated with inputs via htmlFor/id — fix the
+  component (good accessibility practice) and the tests
+
+  Fix the SearchForm to add proper label associations:
+
+⏺ Update(app/search/SearchForm.tsx)
+  ⎿  Added 10 lines, removed 5 lines
+      205        <div className="border-t border-gray-100 pt-4 grid grid-
+           cols-2 gap-3">
+      206          {/* Origin */}
+      207          <div>
+      208 -          <label className="block text-xs font-medium text-gra
+          -y-500 mb-1">From</label>                                      
+      208 +          <label htmlFor="origin" className="block text-xs fon
+          +t-medium text-gray-500 mb-1">From</label>                     
+      209            <select
+      210 +            id="origin"                                       
+      211              className="w-full px-3 py-2 rounded-lg border bord
+           er-gray-200 text-sm focus:outline-none focus:border-blue-400"
+      212              value={form.origin?.code ?? ''}
+      213              onChange={(e) => setForm((p) => ({ ...p, origin: A
+           IRPORTS.find((a) => a.code === e.target.value) ?? null }))}
+     ...
+      219  
+      220          {/* Destination */}
+      221          <div>
+      221 -          <label className="block text-xs font-medium text-gra
+          -y-500 mb-1">To</label>                                        
+      222 +          <label htmlFor="destination" className="block text-x
+          +s font-medium text-gray-500 mb-1">To</label>                  
+      223            <select
+      224 +            id="destination"                                  
+      225              className="w-full px-3 py-2 rounded-lg border bord
+           er-gray-200 text-sm focus:outline-none focus:border-blue-400"
+      226              value={form.destination?.code ?? ''}
+      227              onChange={(e) => setForm((p) => ({ ...p, destinati
+           on: AIRPORTS.find((a) => a.code === e.target.value) ?? null })
+           )}
+     ...
+      233  
+      234          {/* Departure date */}
+      235          <div>
+      234 -          <label className="block text-xs font-medium text-gra
+          -y-500 mb-1">Departure</label>                                 
+      236 +          <label htmlFor="departure" className="block text-xs 
+          +font-medium text-gray-500 mb-1">Departure</label>             
+      237            <input
+      238 +            id="departure"                                    
+      239              type="date"
+      240              className="w-full px-3 py-2 rounded-lg border bord
+           er-gray-200 text-sm focus:outline-none focus:border-blue-400"
+      241              value={form.departureDate}
+     ...
+      245  
+      246          {/* Return date — only when round trip */}
+      247          <div>
+      245 -          <label className="block text-xs font-medium text-gra
+          -y-500 mb-1">                                                  
+      248 +          <label htmlFor="return-date" className="block text-x
+          +s font-medium text-gray-500 mb-1">                            
+      249              Return {!isRoundTrip && <span className="text-gray
+           -300">(one way)</span>}
+      250            </label>
+      251            <input
+      252 +            id="return-date"                                  
+      253              type="date"
+      254              disabled={!isRoundTrip}
+      255              min={form.departureDate || undefined}
+     ...
+      270  
+      271          {/* Cabin class */}
+      272          <div>
+      269 -          <label className="block text-xs font-medium text-gra
+          -y-500 mb-1">Class</label>                                     
+      273 +          <label htmlFor="cabin-class" className="block text-x
+          +s font-medium text-gray-500 mb-1">Class</label>               
+      274            <select
+      275 +            id="cabin-class"                                  
+      276              className="w-full px-3 py-2 rounded-lg border bord
+           er-gray-200 text-sm focus:outline-none focus:border-blue-400"
+      277              value={form.class}
+      278              onChange={(e) => setForm((p) => ({ ...p, class: e.
+           target.value as CabinClass }))}
+
+⏺ Now update tests to use the new ids and fix the Anthropic mock in all agent
+  test files:
+
+⏺ Update(__tests__/unit/search/SearchForm.test.tsx)
+  ⎿  Error editing file
+
+⏺ Write(__tests__/unit/search/SearchForm.test.tsx)
+  ⎿  Added 85 lines, removed 75 lines
+       1  import { render, screen, fireEvent, waitFor, act } from '@testi
+          ng-library/react';
+       2 -import userEvent from '@testing-library/user-event';           
+       2  import { SearchForm } from '@/app/search/SearchForm';
+       3  
+       5 -// Mock next/navigation                                        
+       4  const mockPush = jest.fn();
+       5  jest.mock('next/navigation', () => ({
+       6    useRouter: () => ({ push: mockPush }),
+       7  }));
+       8  
+      11 -// Mock bookingStore                                           
+       9  const mockSetSearchParams = jest.fn();
+      10  jest.mock('@/utils/bookingStore', () => ({
+      11    useBooking: () => ({ setSearchParams: mockSetSearchParams }),
+      12  }));
+      13  
+      17 -// Mock fetch for NL search                                    
+      14  global.fetch = jest.fn();
+      15  
+      16  beforeEach(() => {
+     ...
+       19    (global.fetch as jest.Mock).mockReset();
+       20  });
+       21  
+       22 +// Helpers                                                    
+       23 +const getFromSelect = () => screen.getByLabelText('From');    
+       24 +const getToSelect = () => screen.getByLabelText('To');        
+       25 +const getDeparture = () => screen.getByLabelText('Departure');
+       26 +const getReturn = () => screen.getByLabelText(/Return/);      
+       27 +const getSearchBtn = () => screen.getByRole('button', { name: 
+          +/Search Flights/ });                                          
+       28 +                                                              
+       29  describe('SearchForm — trip type toggle', () => {
+       27 -  it('defaults to One Way', () => {                           
+       30 +  it('defaults to One Way (active style)', () => {            
+       31      render(<SearchForm />);
+       29 -    const oneWay = screen.getByRole('button', { name: 'One Way
+          -' });                                                         
+       30 -    expect(oneWay.className).toContain('bg-white');           
+       32 +    expect(screen.getByRole('button', { name: 'One Way' }).cla
+          +ssName).toContain('bg-white');                                
+       33    });
+       34  
+       35    it('switches to Round Trip on click', () => {
+       36      render(<SearchForm />);
+       37      fireEvent.click(screen.getByRole('button', { name: 'Round 
+           Trip' }));
+       36 -    const roundTrip = screen.getByRole('button', { name: 'Roun
+          -d Trip' });                                                   
+       37 -    expect(roundTrip.className).toContain('bg-white');        
+       38 +    expect(screen.getByRole('button', { name: 'Round Trip' }).
+          +className).toContain('bg-white');                             
+       39    });
+       40  
+       41    it('return date is disabled in One Way mode', () => {
+       42      render(<SearchForm />);
+       42 -    const returnInput = screen.getByLabelText(/Return/);      
+       43 -    expect(returnInput).toBeDisabled();                       
+       43 +    expect(getReturn()).toBeDisabled();                       
+       44    });
+       45  
+       46    it('return date is enabled in Round Trip mode', () => {
+       47      render(<SearchForm />);
+       48      fireEvent.click(screen.getByRole('button', { name: 'Round 
+           Trip' }));
+       49 -    const returnInput = screen.getByLabelText(/Return/);      
+       50 -    expect(returnInput).not.toBeDisabled();                   
+       49 +    expect(getReturn()).not.toBeDisabled();                   
+       50    });
+       51  
+       52    it('switching back to One Way disables return date again', (
+           ) => {
+       53      render(<SearchForm />);
+       54      fireEvent.click(screen.getByRole('button', { name: 'Round 
+           Trip' }));
+       55      fireEvent.click(screen.getByRole('button', { name: 'One Wa
+           y' }));
+       57 -    expect(screen.getByLabelText(/Return/)).toBeDisabled();   
+       56 +    expect(getReturn()).toBeDisabled();                       
+       57    });
+       58  });
+       59  
+       60  describe('SearchForm — submit guard', () => {
+       61    it('search button is disabled initially', () => {
+       62      render(<SearchForm />);
+       64 -    expect(screen.getByRole('button', { name: /Search Flights/
+          - })).toBeDisabled();                                          
+       63 +    expect(getSearchBtn()).toBeDisabled();                    
+       64    });
+       65  
+       67 -  it('search button enables after filling required one-way fie
+          -lds', () => {                                                 
+       66 +  it('enables after filling required one-way fields', () => { 
+       67      render(<SearchForm />);
+       69 -    fireEvent.change(screen.getByLabelText('From'), { target: 
+          -{ value: 'JFK' } });                                          
+       70 -    fireEvent.change(screen.getByLabelText('To'), { target: { 
+          -value: 'LHR' } });                                            
+       71 -    fireEvent.change(screen.getByLabelText('Departure'), { tar
+          -get: { value: '2026-06-01' } });                              
+       72 -    expect(screen.getByRole('button', { name: /Search Flights/
+          - })).not.toBeDisabled();                                      
+       68 +    fireEvent.change(getFromSelect(), { target: { value: 'JFK'
+          + } });                                                        
+       69 +    fireEvent.change(getToSelect(), { target: { value: 'LHR' }
+          + });                                                          
+       70 +    fireEvent.change(getDeparture(), { target: { value: '2026-
+          +06-01' } });                                                  
+       71 +    expect(getSearchBtn()).not.toBeDisabled();                
+       72    });
+       73  
+       75 -  it('search button stays disabled for round-trip without retu
+          -rn date', () => {                                             
+       74 +  it('stays disabled for round-trip without return date', () =
+          +> {                                                           
+       75      render(<SearchForm />);
+       76      fireEvent.click(screen.getByRole('button', { name: 'Round 
+           Trip' }));
+       78 -    fireEvent.change(screen.getByLabelText('From'), { target: 
+          -{ value: 'JFK' } });                                          
+       79 -    fireEvent.change(screen.getByLabelText('To'), { target: { 
+          -value: 'LHR' } });                                            
+       80 -    fireEvent.change(screen.getByLabelText('Departure'), { tar
+          -get: { value: '2026-06-01' } });                              
+       81 -    expect(screen.getByRole('button', { name: /Search Flights/
+          - })).toBeDisabled();                                          
+       77 +    fireEvent.change(getFromSelect(), { target: { value: 'JFK'
+          + } });                                                        
+       78 +    fireEvent.change(getToSelect(), { target: { value: 'LHR' }
+          + });                                                          
+       79 +    fireEvent.change(getDeparture(), { target: { value: '2026-
+          +06-01' } });                                                  
+       80 +    expect(getSearchBtn()).toBeDisabled();                    
+       81    });
+       82  
+       84 -  it('search button enables for round-trip with all fields fil
+          -led', () => {                                                 
+       83 +  it('enables for round-trip when all fields are filled', () =
+          +> {                                                           
+       84      render(<SearchForm />);
+       85      fireEvent.click(screen.getByRole('button', { name: 'Round 
+           Trip' }));
+       87 -    fireEvent.change(screen.getByLabelText('From'), { target: 
+          -{ value: 'JFK' } });                                          
+       88 -    fireEvent.change(screen.getByLabelText('To'), { target: { 
+          -value: 'LHR' } });                                            
+       89 -    fireEvent.change(screen.getByLabelText('Departure'), { tar
+          -get: { value: '2026-06-01' } });                              
+       90 -    fireEvent.change(screen.getByLabelText(/Return/), { target
+          -: { value: '2026-06-15' } });                                 
+       91 -    expect(screen.getByRole('button', { name: /Search Flights/
+          - })).not.toBeDisabled();                                      
+       86 +    fireEvent.change(getFromSelect(), { target: { value: 'JFK'
+          + } });                                                        
+       87 +    fireEvent.change(getToSelect(), { target: { value: 'LHR' }
+          + });                                                          
+       88 +    fireEvent.change(getDeparture(), { target: { value: '2026-
+          +06-01' } });                                                  
+       89 +    fireEvent.change(getReturn(), { target: { value: '2026-06-
+          +15' } });                                                     
+       90 +    expect(getSearchBtn()).not.toBeDisabled();                
+       91    });
+       92  });
+       93  
+       94  describe('SearchForm — form submission', () => {
+       95    it('calls setSearchParams and navigates on submit', () => {
+       96      render(<SearchForm />);
+       98 -    fireEvent.change(screen.getByLabelText('From'), { target: 
+          -{ value: 'JFK' } });                                          
+       99 -    fireEvent.change(screen.getByLabelText('To'), { target: { 
+          -value: 'LHR' } });                                            
+      100 -    fireEvent.change(screen.getByLabelText('Departure'), { tar
+          -get: { value: '2026-06-01' } });                              
+      101 -    fireEvent.click(screen.getByRole('button', { name: /Search
+          - Flights/ }));                                                
+       97 +    fireEvent.change(getFromSelect(), { target: { value: 'JFK'
+          + } });                                                        
+       98 +    fireEvent.change(getToSelect(), { target: { value: 'LHR' }
+          + });                                                          
+       99 +    fireEvent.change(getDeparture(), { target: { value: '2026-
+          +06-01' } });                                                  
+      100 +    fireEvent.click(getSearchBtn());                          
+      101      expect(mockSetSearchParams).toHaveBeenCalledTimes(1);
+      102      expect(mockPush).toHaveBeenCalledWith('/search/results');
+      103    });
+      104  
+      106 -  it('one-way submission does not include returnDate', () => {
+      105 +  it('one-way submission strips returnDate from params', () =>
+          + {                                                            
+      106      render(<SearchForm />);
+      108 -    fireEvent.change(screen.getByLabelText('From'), { target: 
+          -{ value: 'JFK' } });                                          
+      109 -    fireEvent.change(screen.getByLabelText('To'), { target: { 
+          -value: 'LHR' } });                                            
+      110 -    fireEvent.change(screen.getByLabelText('Departure'), { tar
+          -get: { value: '2026-06-01' } });                              
+      111 -    fireEvent.click(screen.getByRole('button', { name: /Search
+          - Flights/ }));                                                
+      107 +    fireEvent.change(getFromSelect(), { target: { value: 'JFK'
+          + } });                                                        
+      108 +    fireEvent.change(getToSelect(), { target: { value: 'LHR' }
+          + });                                                          
+      109 +    fireEvent.change(getDeparture(), { target: { value: '2026-
+          +06-01' } });                                                  
+      110 +    fireEvent.click(getSearchBtn());                          
+      111      const params = mockSetSearchParams.mock.calls[0][0];
+      112      expect(params.returnDate).toBeUndefined();
+      113    });
+     ...
+      115    it('round-trip submission includes returnDate', () => {
+      116      render(<SearchForm />);
+      117      fireEvent.click(screen.getByRole('button', { name: 'Round 
+           Trip' }));
+      119 -    fireEvent.change(screen.getByLabelText('From'), { target: 
+          -{ value: 'JFK' } });                                          
+      120 -    fireEvent.change(screen.getByLabelText('To'), { target: { 
+          -value: 'LHR' } });                                            
+      121 -    fireEvent.change(screen.getByLabelText('Departure'), { tar
+          -get: { value: '2026-06-01' } });                              
+      122 -    fireEvent.change(screen.getByLabelText(/Return/), { target
+          -: { value: '2026-06-15' } });                                 
+      123 -    fireEvent.click(screen.getByRole('button', { name: /Search
+          - Flights/ }));                                                
+      124 -    const params = mockSetSearchParams.mock.calls[0][0];      
+      125 -    expect(params.returnDate).toBe('2026-06-15');             
+      118 +    fireEvent.change(getFromSelect(), { target: { value: 'JFK'
+          + } });                                                        
+      119 +    fireEvent.change(getToSelect(), { target: { value: 'LHR' }
+          + });                                                          
+      120 +    fireEvent.change(getDeparture(), { target: { value: '2026-
+          +06-01' } });                                                  
+      121 +    fireEvent.change(getReturn(), { target: { value: '2026-06-
+          +15' } });                                                     
+      122 +    fireEvent.click(getSearchBtn());                          
+      123 +    expect(mockSetSearchParams.mock.calls[0][0].returnDate).to
+          +Be('2026-06-15');                                             
+      124    });
+      125 +                                                              
+      126 +  it('submitted params contain correct tripType', () => {     
+      127 +    render(<SearchForm />);                                   
+      128 +    fireEvent.click(screen.getByRole('button', { name: 'Round 
+          +Trip' }));                                                    
+      129 +    fireEvent.change(getFromSelect(), { target: { value: 'JFK'
+          + } });                                                        
+      130 +    fireEvent.change(getToSelect(), { target: { value: 'LHR' }
+          + });                                                          
+      131 +    fireEvent.change(getDeparture(), { target: { value: '2026-
+          +06-01' } });                                                  
+      132 +    fireEvent.change(getReturn(), { target: { value: '2026-06-
+          +15' } });                                                     
+      133 +    fireEvent.click(getSearchBtn());                          
+      134 +    expect(mockSetSearchParams.mock.calls[0][0].tripType).toBe
+          +('roundTrip');                                                
+      135 +  });                                                         
+      136  });
+      137  
+      138  describe('SearchForm — PassengerPicker', () => {
+      130 -  it('renders trigger showing 1 passenger by default', () => {
+      139 +  it('shows "1 passenger" by default', () => {                
+      140      render(<SearchForm />);
+      141      expect(screen.getByText('1 passenger')).toBeInTheDocument(
+           );
+      142    });
+     ...
+      152    it('increments adult count', () => {
+      153      render(<SearchForm />);
+      154      fireEvent.click(screen.getByText('1 passenger'));
+      146 -    // Adults row — find the + button next to count 1         
+      147 -    const plusButtons = screen.getAllByText('+');             
+      148 -    fireEvent.click(plusButtons[0]); // adults +              
+      155 +    fireEvent.click(screen.getAllByText('+')[0]); // adults + 
+      156      expect(screen.getByText('2 passengers')).toBeInTheDocument
+           ();
+      157    });
+      158  
+      159    it('cannot decrement adults below 1', () => {
+      160      render(<SearchForm />);
+      161      fireEvent.click(screen.getByText('1 passenger'));
+      155 -    const minusButtons = screen.getAllByText('−');            
+      156 -    fireEvent.click(minusButtons[0]); // adults −             
+      162 +    fireEvent.click(screen.getAllByText('−')[0]); // adults − 
+      163      expect(screen.getByText('1 passenger')).toBeInTheDocument(
+           );
+      164    });
+      165  
+      166    it('increments children count', () => {
+      167      render(<SearchForm />);
+      168      fireEvent.click(screen.getByText('1 passenger'));
+      163 -    const plusButtons = screen.getAllByText('+');             
+      164 -    fireEvent.click(plusButtons[1]); // children +            
+      169 +    fireEvent.click(screen.getAllByText('+')[1]); // children 
+          ++                                                             
+      170      expect(screen.getByText('2 passengers')).toBeInTheDocument
+           ();
+      171    });
+      172  
+      173    it('caps infants at adult count', () => {
+      174      render(<SearchForm />);
+      175      fireEvent.click(screen.getByText('1 passenger'));
+      171 -    const plusButtons = screen.getAllByText('+');             
+      172 -    fireEvent.click(plusButtons[2]); // infants +             
+      173 -    fireEvent.click(plusButtons[2]); // try to go to 2 infants
+          - with 1 adult                                                 
+      174 -    // Should stay at 1 infant                                
+      176 +    const plus = screen.getAllByText('+');                    
+      177 +    fireEvent.click(plus[2]); // infants + → 1 infant (= 1 adu
+          +lt, OK)                                                       
+      178 +    fireEvent.click(plus[2]); // infants + → would be 2 but ad
+          +ult=1, so stays at 1                                          
+      179 +    // total still 2 (1 adult + 1 infant)                     
+      180      expect(screen.getByText('2 passengers')).toBeInTheDocument
+           ();
+      181    });
+      182  
+     ...
+      199        ok: true,
+      200        json: async () => ({
+      201          result: JSON.stringify({
+      197 -          origin: { code: 'JFK' }, destination: { code: 'LHR' 
+          -},                                                            
+      198 -          departureDate: '2026-06-01', tripType: 'oneWay',    
+      199 -          passengers: { adults: 1, children: 0, infants: 0 }, 
+          -class: 'economy',                                             
+      202 +          origin: { code: 'JFK', city: 'New York', name: 'JFK'
+          +, country: 'USA' },                                           
+      203 +          destination: { code: 'LHR', city: 'London', name: 'L
+          +HR', country: 'UK' },                                         
+      204 +          departureDate: '2026-06-01',                        
+      205 +          tripType: 'oneWay',                                 
+      206 +          passengers: { adults: 1, children: 0, infants: 0 }, 
+      207 +          class: 'economy',                                   
+      208          }),
+      209        }),
+      210      });
+      203 -                                                              
+      211      render(<SearchForm />);
+      205 -    fireEvent.change(                                         
+      206 -      screen.getByPlaceholderText(/Try:/),                    
+      207 -      { target: { value: 'flights JFK to LHR' } },            
+      208 -    );                                                        
+      212 +    fireEvent.change(screen.getByPlaceholderText(/Try:/), { ta
+          +rget: { value: 'flights JFK to LHR' } });                     
+      213      await act(async () => {
+      214        fireEvent.click(screen.getByRole('button', { name: /AI S
+           earch/ }));
+      215      });
+      212 -                                                              
+      213 -    expect(global.fetch).toHaveBeenCalledWith(                
+      214 -      '/api/agents',                                          
+      215 -      expect.objectContaining({ method: 'POST' }),            
+      216 -    );                                                        
+      216 +    expect(global.fetch).toHaveBeenCalledWith('/api/agents', e
+          +xpect.objectContaining({ method: 'POST' }));                  
+      217    });
+      218  
+      219 -  it('shows error message when AI search fails', async () => {
+      219 +  it('shows error when AI search returns non-ok response', asy
+          +nc () => {                                                    
+      220      (global.fetch as jest.Mock).mockResolvedValueOnce({ ok: fa
+           lse, status: 500 });
+      221 -                                                              
+      221      render(<SearchForm />);
+      222      fireEvent.change(screen.getByPlaceholderText(/Try:/), { ta
+           rget: { value: 'bad query' } });
+      223      await act(async () => {
+      224        fireEvent.click(screen.getByRole('button', { name: /AI S
+           earch/ }));
+      225      });
+      227 -                                                              
+      226      await waitFor(() => {
+      227        expect(screen.getByText(/Server error: 500/)).toBeInTheD
+           ocument();
+      228      });
+      229    });
+      230 +                                                              
+      231 +  it('shows error when fetch throws', async () => {           
+      232 +    (global.fetch as jest.Mock).mockRejectedValueOnce(new Erro
+          +r('Network error'));                                          
+      233 +    render(<SearchForm />);                                   
+      234 +    fireEvent.change(screen.getByPlaceholderText(/Try:/), { ta
+          +rget: { value: 'query' } });                                  
+      235 +    await act(async () => {                                   
+      236 +      fireEvent.click(screen.getByRole('button', { name: /AI S
+          +earch/ }));                                                   
+      237 +    });                                                       
+      238 +    await waitFor(() => {                                     
+      239 +      expect(screen.getByText(/Network error/)).toBeInTheDocum
+          +ent();                                                        
+      240 +    });                                                       
+      241 +  });                                                         
+      242  });
+
+⏺ Now fix the Anthropic mock in all agent test files to use __esModule: true:
+
+⏺ Update(__tests__/unit/core/agents/base.test.ts)
+  ⎿  Added 1 line
+      3  // Mock the Anthropic SDK
+      4  const mockCreate = jest.fn();
+      5  jest.mock('@anthropic-ai/sdk', () => ({
+      6 +  __esModule: true,                                             
+      7    default: jest.fn().mockImplementation(() => ({
+      8      messages: { create: mockCreate },
+      9    })),
+
+⏺ Update(__tests__/unit/core/agents/SearchAgent.test.ts)
+  ⎿  Added 1 line
+      1  const mockCreate = jest.fn();
+      2  jest.mock('@anthropic-ai/sdk', () => ({
+      3 +  __esModule: true,                                             
+      4    default: jest.fn().mockImplementation(() => ({
+      5      messages: { create: mockCreate },
+      6    })),
+
+⏺ Update(__tests__/unit/core/agents/other-agents.test.ts)
+  ⎿  Added 1 line
+      1  const mockCreate = jest.fn();
+      2  jest.mock('@anthropic-ai/sdk', () => ({
+      3 +  __esModule: true,                                             
+      4    default: jest.fn().mockImplementation(() => ({
+      5      messages: { create: mockCreate },
+      6    })),
+
+⏺ Update(__tests__/unit/core/orchestrator.test.ts)
+  ⎿  Added 1 line
+      1  const mockCreate = jest.fn();
+      2  jest.mock('@anthropic-ai/sdk', () => ({
+      3 +  __esModule: true,                                             
+      4    default: jest.fn().mockImplementation(() => ({
+      5      messages: { create: mockCreate },
+      6    })),
+
+⏺ Update(__tests__/integration/api/agents.test.ts)
+  ⎿  Added 1 line
+      3   */
+      4  const mockCreate = jest.fn();
+      5  jest.mock('@anthropic-ai/sdk', () => ({
+      6 +  __esModule: true,                                             
+      7    default: jest.fn().mockImplementation(() => ({
+      8      messages: { create: mockCreate },
+      9    })),
+
+⏺ Bash(npx jest --no-coverage 2>&1)
+  ⎿  Error: Exit code 1
+     npm warn cli npm v11.11.1 does not support Node.js v22.8.0. This version of
+      npm supports the following node versions: `^20.17.0 || >=22.9.0`. You can 
+     find the latest version at https://nodejs.org/.
+     FAIL __tests__/integration/api/agents.test.ts
+       ● POST /api/agents › throws (500) for unknown agent intent
+
+         Unknown agent intent: ghost
+
+           19 |         return disruptionAgent.handleDisruption(payload, 
+     context);
+           20 |       default:
+         > 21 |         throw new Error(`Unknown agent intent: ${intent}`);
+     … +87 lines (ctrl+o to see all)
+
+⏺ Two more issues: the const variables have TDZ when jest.mock factory runs, and
+   the unknown-intent test needs to expect a thrown error (the route doesn't
+  catch it). Let me fix both by restructuring the mock factory pattern:
+
+⏺ Write(__tests__/unit/core/agents/base.test.ts)  ⎿  Added 17 lines, removed 11 lines
+       1 -import { BaseAgent, AgentContext } from '@/core/agents/base';  
+       1 +// Self-contained mock — no external variable references needed
+       2 +jest.mock('@anthropic-ai/sdk', () => {                         
+       3 +  const create = jest.fn();                                    
+       4 +  return {                                                     
+       5 +    __esModule: true,                                          
+       6 +    default: class MockAnthropic {                             
+       7 +      static mockCreate = create;                              
+       8 +      messages = { create };                                   
+       9 +    },                                                         
+      10 +  };                                                           
+      11 +});                                                            
+      12  
+       3 -// Mock the Anthropic SDK                                      
+       4 -const mockCreate = jest.fn();                                  
+       5 -jest.mock('@anthropic-ai/sdk', () => ({                        
+       6 -  __esModule: true,                                            
+       7 -  default: jest.fn().mockImplementation(() => ({               
+       8 -    messages: { create: mockCreate },                          
+       9 -  })),                                                         
+      10 -}));                                                           
+      13 +import Anthropic from '@anthropic-ai/sdk';                     
+      14 +import { BaseAgent } from '@/core/agents/base';                
+      15  
+      16 +const mockCreate = (Anthropic as any).mockCreate as jest.Mock; 
+      17 +                                                               
+      18  class TestAgent extends BaseAgent {
+      19    name = 'TestAgent';
+      20    systemPrompt = 'You are a test agent for {airline}.';
+     ...
+      58      expect(call.system).not.toContain('{airline}');
+      59    });
+      60  
+      55 -  it('buildSystemPrompt leaves {airline} unchanged when no cont
+         -ext', async () => {                                            
+      61 +  it('buildSystemPrompt leaves {airline} when no airlineName in
+         + context', async () => {                                       
+      62      mockCreate.mockResolvedValue({ content: [{ type: 'text', te
+          xt: 'ok' }] });
+      63      await agent.invoke('q');
+      64      const call = mockCreate.mock.calls[0][0];
+     ...
+      73      expect(call.messages[0].role).toBe('user');
+      74    });
+      75  
+      70 -  it('invoke passes max_tokens', async () => {                 
+      76 +  it('invoke uses max_tokens of 1024', async () => {           
+      77      mockCreate.mockResolvedValue({ content: [{ type: 'text', te
+          xt: 'ok' }] });
+      78      await agent.invoke('test');
+      79      expect(mockCreate.mock.calls[0][0].max_tokens).toBe(1024);
+  ⎿  You've hit your limit · resets 1am (America/Chicago)
+     /upgrade or /extra-usage to finish what you’re working on.
+
+✻ Cooked for 10m 53s
