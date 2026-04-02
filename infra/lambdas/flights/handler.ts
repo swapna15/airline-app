@@ -51,6 +51,8 @@ async function searchFlights(body: string | null): Promise<APIGatewayProxyResult
 
   const cabinClass = data.cabin_class ?? 'economy';
   const passengers = (data.adults ?? 1) + (data.children ?? 0);
+  const origin = typeof data.origin === 'object' ? (data.origin as any).code : data.origin;
+  const destination = typeof data.destination === 'object' ? (data.destination as any).code : data.destination;
 
   const outbound = await query(
     `SELECT ${FLIGHT_SELECT}
@@ -62,7 +64,7 @@ async function searchFlights(body: string | null): Promise<APIGatewayProxyResult
      ${FLIGHT_GROUP}
      HAVING COUNT(s.id) FILTER (WHERE s.is_occupied = false AND s.class = $4) >= $5
      ORDER BY f.departure_time`,
-    [data.origin.toUpperCase(), data.destination.toUpperCase(), data.date, cabinClass, passengers],
+    [origin.toUpperCase(), destination.toUpperCase(), data.date, cabinClass, passengers],
   );
 
   const result: Record<string, unknown> = { outbound };
@@ -78,7 +80,7 @@ async function searchFlights(body: string | null): Promise<APIGatewayProxyResult
        ${FLIGHT_GROUP}
        HAVING COUNT(s.id) FILTER (WHERE s.is_occupied = false AND s.class = $4) >= $5
        ORDER BY f.departure_time`,
-      [data.origin.toUpperCase(), data.destination.toUpperCase(), data.return_date, cabinClass, passengers],
+      [origin.toUpperCase(), destination.toUpperCase(), data.return_date, cabinClass, passengers],
     );
     result.inbound = inbound;
   }
