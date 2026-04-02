@@ -44,6 +44,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Build Lambda functions
+        run: |
+          cd infra/lambdas
+          npm ci
+          npm run bundle
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
