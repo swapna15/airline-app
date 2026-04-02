@@ -29,6 +29,7 @@ export function ClaudeAssistant({ defaultAgent = 'support' }: Props) {
         content: `Hi! I'm your AI travel assistant for ${adapter.brand.name}. Ask me anything about your trip, baggage, or seats!`,
       }]);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   useEffect(() => {

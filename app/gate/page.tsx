@@ -71,7 +71,7 @@ export default function GatePage() {
     <div className="max-w-5xl mx-auto px-4 py-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Gate Dashboard</h1>
-        <p className="text-sm text-gray-500 mt-1">Today's departures — {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
+        <p className="text-sm text-gray-500 mt-1">Today&apos;s departures — {new Date().toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
       </div>
 
       <div className="grid grid-cols-3 gap-6">

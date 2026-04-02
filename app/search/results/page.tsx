@@ -26,6 +26,7 @@ export default function ResultsPage() {
       .then((r) => r.json())
       .then(({ flights }) => setFlights(flights))
       .finally(() => setLoading(false));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSelect = (flight: Flight) => {
