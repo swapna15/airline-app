@@ -104,7 +104,7 @@ resource "aws_security_group" "lambda" {
 resource "aws_security_group" "rds_proxy" {
   name        = "${local.name}-rds-proxy-sg"
   vpc_id      = aws_vpc.main.id
-  description = "RDS Proxy — accept from Lambda"
+  description = "RDS Proxy - accept from Lambda"
 
   ingress {
     from_port       = 5432
@@ -126,7 +126,7 @@ resource "aws_security_group" "rds_proxy" {
 resource "aws_security_group" "aurora" {
   name        = "${local.name}-aurora-sg"
   vpc_id      = aws_vpc.main.id
-  description = "Aurora — accept from RDS Proxy only"
+  description = "Aurora - accept from RDS Proxy only"
 
   ingress {
     from_port       = 5432
