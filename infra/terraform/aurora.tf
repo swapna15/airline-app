@@ -22,7 +22,7 @@ resource "aws_rds_cluster" "main" {
   vpc_security_group_ids = [aws_security_group.aurora.id]
 
   serverlessv2_scaling_configuration {
-    min_capacity = 0.5
+    min_capacity = 1
     max_capacity = 16
   }
 

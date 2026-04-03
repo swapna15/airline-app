@@ -56,7 +56,8 @@ override.tf.json
 .terraformrc
 terraform.rc
 
-# Lambda node_modules
+# Lambda build artifacts
+lambdas/dist/
 lambdas/**/node_modules/
 lambdas/**/package-lock.json
 

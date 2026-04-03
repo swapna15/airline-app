@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/auth';
 
+export const maxDuration = 30;
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
 export async function GET(
