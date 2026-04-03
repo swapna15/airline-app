@@ -91,6 +91,14 @@ resource "aws_security_group" "lambda" {
   vpc_id      = aws_vpc.main.id
   description = "Lambda functions outbound only"
 
+  ingress {
+    description = "Allow Lambda to reach VPC interface endpoints (Secrets Manager)"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = [local.vpc_cidr]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0

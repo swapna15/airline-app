@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { MockAdapter } from '@/core/adapters/mock';
 import type { Flight, SearchParams } from '@/types/flight';
 
+export const maxDuration = 30; // seconds — matches API Gateway max timeout
+
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 const adapter = new MockAdapter();
 
