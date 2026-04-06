@@ -30,6 +30,7 @@ export interface PriceBreakdown {
   taxes: number;
   fees: number;
   seatFees: number;
+  baggageFees: number;
   total: number;
 }
 

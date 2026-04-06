@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Plane, AlertTriangle, Clock, Sparkles, Loader2 } from 'lucide-react';
+import { AirlineLogo } from '@/components/AirlineLogo';
 
 interface CoordFlight {
   id: string;
@@ -112,7 +113,10 @@ export default function CoordinatorPage() {
               }`}
             >
               <div className="flex justify-between items-start mb-1">
-                <p className="font-bold text-gray-900 text-sm">{f.flight}</p>
+                <div className="flex items-center gap-2">
+                  <AirlineLogo code={f.flight.match(/^[A-Z]+/)?.[0] ?? ''} name={f.airline} size={20} />
+                  <p className="font-bold text-gray-900 text-sm">{f.flight}</p>
+                </div>
                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[f.status]}`}>
                   {f.status}
                 </span>
@@ -136,7 +140,7 @@ export default function CoordinatorPage() {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="flex items-center gap-2">
-                      <Plane size={16} className="text-blue-600" />
+                      <AirlineLogo code={selected.flight.match(/^[A-Z]+/)?.[0] ?? ''} name={selected.airline} size={28} />
                       <h2 className="font-bold text-gray-900">{selected.flight}</h2>
                       <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[selected.status]}`}>
                         {selected.status}

@@ -37,6 +37,13 @@ Two project-specific Claude Code skills are registered:
 - `/add-airline` — scaffolds a new airline adapter into `core/adapters/`
 - `/run-agent` — invokes an agent intent against the local dev server for quick testing
 
+## Project Specs
+
+`.claude/specs/` contains:
+- `requirements.md` — full functional/non-functional requirements (source of truth for intended behavior)
+- `tasks.md` — phased implementation checklist with verification steps
+- `design.md` — design decisions
+
 ## Architecture
 
 ### Frontend (Next.js 14 App Router)
@@ -48,7 +55,7 @@ The app has **two distinct user surfaces** rendered conditionally by role:
 
 Role is stored in the NextAuth JWT and propagated via `session.user.role`. The `middleware.ts` enforces route-level access using `ROUTE_ROLES`. The `Navbar` renders different nav links and a role badge based on session role.
 
-**Booking state** is managed by `utils/bookingStore.tsx` (React Context), shared across the multi-step `/booking/*` pages. Each step reads/writes the same context, so page-level state is not self-contained.
+**Booking state** is managed by `utils/bookingStore.tsx` (React Context + localStorage), shared across the multi-step `/booking/*` pages. Each step reads/writes the same context; state is persisted to localStorage so a page refresh during booking restores where the user left off. `reset()` clears both.
 
 **Role system** (`types/roles.ts`):
 - 5 roles: `passenger`, `checkin_agent`, `gate_manager`, `coordinator`, `admin`
@@ -91,7 +98,7 @@ Four agents all extend `BaseAgent` (`core/agents/base.ts`), which wraps the Anth
 
 ### Next.js API routes → Lambda bridge
 
-`app/api/flights/route.ts`, `app/api/bookings/`, `app/api/auth/register/` check `NEXT_PUBLIC_API_URL`:
+`app/api/flights/route.ts`, `app/api/bookings/route.ts`, `app/api/auth/register/route.ts` check `NEXT_PUBLIC_API_URL`:
 - **Set** → forward request to the real Lambda endpoint with the session JWT as `Authorization: Bearer`
 - **Unset** → fall back to `MockAdapter` or local mock response
 
@@ -105,7 +112,8 @@ Four agents all extend `BaseAgent` (`core/agents/base.ts`), which wraps the Anth
 | `NEXTAUTH_URL` | Yes | Full app URL (e.g. `https://app.vercel.app`) |
 | `ANTHROPIC_API_KEY` | Yes | Anthropic SDK for all 4 agents + Claude assistant |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | For Google OAuth | Google sign-in |
-| `NEXT_PUBLIC_API_URL` | No | API Gateway base URL; omit to use mock data |
+| `NEXT_PUBLIC_API_URL` | No | API Gateway base URL; omit to use Duffel or mock |
+| `DUFFEL_ACCESS_TOKEN` | No | Duffel API token (`duffel_test_…` for sandbox). When set and `NEXT_PUBLIC_API_URL` is unset, real flight search is used |
 
 ## Testing patterns
 
@@ -126,3 +134,7 @@ const mockCreate = (Anthropic as any).mockCreate as jest.Mock;
 ```
 
 Coverage is collected only from `core/`, `components/`, `utils/mockData.ts`, `app/search/`, and the three API routes — not from Next.js pages or Lambda code.
+
+## TypeScript
+
+The project runs in strict mode (`tsconfig.json`). All types live in `types/` — `airline.ts`, `flight.ts`, `booking.ts`, `roles.ts`. Lambda code compiles to CommonJS (`infra/lambdas/tsconfig.json`) separately from the Next.js build.

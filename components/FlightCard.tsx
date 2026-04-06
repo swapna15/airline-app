@@ -1,6 +1,8 @@
 'use client';
 
 import type { Flight, CabinClass } from '@/types/flight';
+import { AirlineLogo } from './AirlineLogo';
+import { Briefcase, Luggage, AlertCircle } from 'lucide-react';
 
 interface Props {
   flight: Flight;
@@ -19,7 +21,9 @@ export function FlightCard({ flight, selectedClass, onSelect }: Props) {
       onClick={() => onSelect(flight)}
     >
       <div className="flex items-center gap-4">
-        <div className="text-2xl">{segment.airline.logo}</div>
+        <div className="w-10 h-10 flex items-center justify-center flex-shrink-0">
+          <AirlineLogo code={segment.airline.code} name={segment.airline.name} />
+        </div>
         <div>
           <p className="text-xs text-gray-500">{segment.airline.name} · {segment.flightNumber}</p>
           <div className="flex items-center gap-3 mt-1">
@@ -45,8 +49,33 @@ export function FlightCard({ flight, selectedClass, onSelect }: Props) {
       </div>
       <div className="text-right">
         <p className="text-2xl font-bold text-blue-600">${price.toLocaleString()}</p>
-        <p className="text-xs text-gray-500">{availability} seats left</p>
-        <button className="mt-2 px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors">
+        <p className="text-xs text-gray-500 mb-1">{availability} seats left</p>
+
+        {/* Baggage summary */}
+        <div className="flex flex-col items-end gap-0.5 mb-2">
+          <span className="flex items-center gap-1 text-xs text-green-600">
+            <Briefcase size={11} />
+            {flight.baggage.carry}
+          </span>
+          {flight.baggage.checkedIncluded ? (
+            <span className="flex items-center gap-1 text-xs text-green-600">
+              <Luggage size={11} />
+              {flight.baggage.checked}
+            </span>
+          ) : flight.baggage.checkedFee ? (
+            <span className="flex items-center gap-1 text-xs text-orange-500">
+              <AlertCircle size={11} />
+              +${flight.baggage.checkedFee} checked bag
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-xs text-gray-400">
+              <Luggage size={11} />
+              No checked bag
+            </span>
+          )}
+        </div>
+
+        <button className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors">
           Select
         </button>
       </div>

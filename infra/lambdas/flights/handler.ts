@@ -1,6 +1,7 @@
 import type { APIGatewayProxyEvent, APIGatewayProxyResult } from 'aws-lambda';
 import { query, queryOne } from '../shared/db';
 import { ok, badRequest, notFound, serverError, parseBody } from '../shared/response';
+import { resolveTenantId } from '../shared/tenant';
 
 interface FlightSearchParams {
   origin: string;
@@ -43,7 +44,10 @@ const FLIGHT_JOINS = `
 const FLIGHT_GROUP = `GROUP BY f.id, al.code, dep.code, arr.code`;
 
 // ── POST /flights/search ──────────────────────────────────────────────────────
-async function searchFlights(body: string | null): Promise<APIGatewayProxyResult> {
+async function searchFlights(
+  body: string | null,
+  tenantId: string,
+): Promise<APIGatewayProxyResult> {
   const data = parseBody<FlightSearchParams>(body);
   if (!data?.origin || !data?.destination || !data?.date) {
     return badRequest('origin, destination, and date are required');
@@ -57,14 +61,15 @@ async function searchFlights(body: string | null): Promise<APIGatewayProxyResult
   const outbound = await query(
     `SELECT ${FLIGHT_SELECT}
      FROM flights f ${FLIGHT_JOINS}
-     WHERE dep.code = $1
-       AND arr.code = $2
-       AND DATE(f.departure_time AT TIME ZONE 'UTC') = $3::date
+     WHERE f.tenant_id = $1
+       AND dep.code = $2
+       AND arr.code = $3
+       AND DATE(f.departure_time AT TIME ZONE 'UTC') = $4::date
        AND f.status NOT IN ('cancelled')
      ${FLIGHT_GROUP}
-     HAVING COUNT(s.id) FILTER (WHERE s.is_occupied = false AND s.class = $4) >= $5
+     HAVING COUNT(s.id) FILTER (WHERE s.is_occupied = false AND s.class = $5) >= $6
      ORDER BY f.departure_time`,
-    [origin.toUpperCase(), destination.toUpperCase(), data.date, cabinClass, passengers],
+    [tenantId, origin.toUpperCase(), destination.toUpperCase(), data.date, cabinClass, passengers],
   );
 
   const result: Record<string, unknown> = { outbound };
@@ -73,14 +78,15 @@ async function searchFlights(body: string | null): Promise<APIGatewayProxyResult
     const inbound = await query(
       `SELECT ${FLIGHT_SELECT}
        FROM flights f ${FLIGHT_JOINS}
-       WHERE dep.code = $2
-         AND arr.code = $1
-         AND DATE(f.departure_time AT TIME ZONE 'UTC') = $3::date
+       WHERE f.tenant_id = $1
+         AND dep.code = $3
+         AND arr.code = $2
+         AND DATE(f.departure_time AT TIME ZONE 'UTC') = $4::date
          AND f.status NOT IN ('cancelled')
        ${FLIGHT_GROUP}
-       HAVING COUNT(s.id) FILTER (WHERE s.is_occupied = false AND s.class = $4) >= $5
+       HAVING COUNT(s.id) FILTER (WHERE s.is_occupied = false AND s.class = $5) >= $6
        ORDER BY f.departure_time`,
-      [origin.toUpperCase(), destination.toUpperCase(), data.return_date, cabinClass, passengers],
+      [tenantId, origin.toUpperCase(), destination.toUpperCase(), data.return_date, cabinClass, passengers],
     );
     result.inbound = inbound;
   }
@@ -89,20 +95,31 @@ async function searchFlights(body: string | null): Promise<APIGatewayProxyResult
 }
 
 // ── GET /flights/{id} ─────────────────────────────────────────────────────────
-async function getFlight(id: string): Promise<APIGatewayProxyResult> {
+async function getFlight(id: string, tenantId: string): Promise<APIGatewayProxyResult> {
   const flight = await queryOne(
     `SELECT ${FLIGHT_SELECT}
      FROM flights f ${FLIGHT_JOINS}
-     WHERE f.id = $1
+     WHERE f.id = $1 AND f.tenant_id = $2
      ${FLIGHT_GROUP}`,
-    [id],
+    [id, tenantId],
   );
   if (!flight) return notFound('Flight');
   return ok(flight);
 }
 
 // ── GET /flights/{id}/seats ───────────────────────────────────────────────────
-async function getSeatMap(flightId: string, cabinClass?: string): Promise<APIGatewayProxyResult> {
+async function getSeatMap(
+  flightId: string,
+  tenantId: string,
+  cabinClass?: string,
+): Promise<APIGatewayProxyResult> {
+  // Verify the flight belongs to this tenant before exposing seat data
+  const flight = await queryOne(
+    'SELECT id FROM flights WHERE id = $1 AND tenant_id = $2',
+    [flightId, tenantId],
+  );
+  if (!flight) return notFound('Flight');
+
   const params: unknown[] = [flightId];
   let cabinFilter = '';
   if (cabinClass) {
@@ -139,14 +156,24 @@ async function getSeatMap(flightId: string, cabinClass?: string): Promise<APIGat
 // ── Router ────────────────────────────────────────────────────────────────────
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   try {
-    const method   = event.httpMethod;
-    const path     = event.path;
-    const flightId = event.pathParameters?.id;
+    const method    = event.httpMethod;
+    const path      = event.path;
+    const flightId  = event.pathParameters?.id;
     const cabinClass = event.queryStringParameters?.cabin_class;
 
-    if (method === 'POST' && path === '/flights/search') return searchFlights(event.body);
-    if (method === 'GET' && flightId && path.endsWith('/seats')) return getSeatMap(flightId, cabinClass ?? undefined);
-    if (method === 'GET' && flightId) return getFlight(flightId);
+    // Public routes read tenant from header; auth'd routes from authorizer context
+    const tenantSlug: string =
+      (event.requestContext as any)?.authorizer?.tenantSlug ??
+      event.headers?.['X-Tenant-ID'] ??
+      event.headers?.['x-tenant-id'] ??
+      'aeromock';
+
+    const tenantId = await resolveTenantId(tenantSlug);
+    if (!tenantId) return badRequest(`Unknown tenant: ${tenantSlug}`);
+
+    if (method === 'POST' && path === '/flights/search') return searchFlights(event.body, tenantId);
+    if (method === 'GET' && flightId && path.endsWith('/seats')) return getSeatMap(flightId, tenantId, cabinClass ?? undefined);
+    if (method === 'GET' && flightId) return getFlight(flightId, tenantId);
 
     return { statusCode: 404, headers: {}, body: JSON.stringify({ error: 'Route not found' }) };
   } catch (err) {

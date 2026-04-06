@@ -42,8 +42,11 @@ export interface Flight {
   prices: Record<CabinClass, number>;
   availability: Record<CabinClass, number>;
   baggage: {
-    carry: string;
-    checked: string;
+    carry: string;           // display string e.g. "1 x 7kg"
+    carryIncluded: boolean;
+    checked: string;         // display string e.g. "1 x 23kg" or "Not included"
+    checkedIncluded: boolean;
+    checkedFee?: number;     // per-passenger fee to add a checked bag (undefined = not purchasable)
   };
   amenities: string[];
 }

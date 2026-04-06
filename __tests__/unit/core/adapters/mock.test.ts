@@ -97,7 +97,7 @@ describe('MockAdapter', () => {
       stops: 0,
       prices: { economy: 320, business: 800, first: 1280 },
       availability: { economy: 40, business: 15, first: 6 },
-      baggage: { carry: '1 x 7kg', checked: '1 x 23kg' },
+      baggage: { carry: '1 x 7kg', carryIncluded: true, checked: '1 x 23kg', checkedIncluded: true },
       amenities: [],
     };
 
@@ -109,7 +109,7 @@ describe('MockAdapter', () => {
         phone: '555-1234',
         address: { street: '1 Main St', city: 'New York', state: 'NY', zipCode: '10001', country: 'USA' },
       },
-      priceBreakdown: { baseFare: 320, taxes: 48, fees: 15, seatFees: 0, total: 383 },
+      priceBreakdown: { baseFare: 320, taxes: 48, fees: 15, seatFees: 0, baggageFees: 0, total: 383 },
     };
 
     it('returns a confirmed booking with bookingId and pnr', async () => {

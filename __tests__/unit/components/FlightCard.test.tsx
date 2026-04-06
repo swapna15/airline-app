@@ -28,7 +28,7 @@ const mockFlight: Flight = {
   stops: 0,
   prices: { economy: 320, business: 800, first: 1280 },
   availability: { economy: 35, business: 14, first: 6 },
-  baggage: { carry: '1 x 7kg', checked: '1 x 23kg' },
+  baggage: { carry: '1 x 7kg', carryIncluded: true, checked: '1 x 23kg', checkedIncluded: true },
   amenities: ['Wi-Fi', 'Meals'],
 };
 

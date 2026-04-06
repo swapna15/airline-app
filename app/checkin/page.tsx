@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Search, CheckCircle, Luggage, Printer, User } from 'lucide-react';
 
 interface Passenger {
@@ -33,6 +33,39 @@ export default function CheckinPage() {
   const [query, setQuery] = useState('');
   const [passengers, setPassengers] = useState(MOCK_PASSENGERS);
   const [selectedPnr, setSelectedPnr] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch('/api/duffel/orders')
+      .then((r) => r.json())
+      .then((data) => {
+        const orders = data.orders ?? [];
+        if (orders.length === 0) return;
+        const duffelPassengers: Passenger[] = orders.map((o: {
+          pnr: string;
+          passengerName: string;
+          flightNumber: string;
+          origin: string;
+          destination: string;
+          cabinClass: string;
+        }) => ({
+          pnr: o.pnr,
+          name: o.passengerName || 'Unknown Passenger',
+          flight: o.flightNumber,
+          route: `${o.origin} → ${o.destination}`,
+          seat: '—',
+          class: o.cabinClass?.toLowerCase().includes('business') ? 'Business'
+            : o.cabinClass?.toLowerCase().includes('first') ? 'First'
+            : 'Economy',
+          bags: 1,
+          checkedIn: false,
+          boardingGroup: 'B',
+        }));
+        // Prepend Duffel orders, keep mock as fallback. Dedupe by PNR.
+        const existingPnrs = new Set(duffelPassengers.map((p) => p.pnr));
+        setPassengers([...duffelPassengers, ...MOCK_PASSENGERS.filter((p) => !existingPnrs.has(p.pnr))]);
+      })
+      .catch(() => {/* keep mock */});
+  }, []);
 
   const results = query.trim()
     ? passengers.filter(

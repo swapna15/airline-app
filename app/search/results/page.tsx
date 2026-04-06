@@ -11,6 +11,7 @@ export default function ResultsPage() {
   const router = useRouter();
   const { searchParams, setSelectedFlight } = useBooking();
   const [flights, setFlights] = useState<Flight[]>([]);
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -24,7 +25,11 @@ export default function ResultsPage() {
       body: JSON.stringify(searchParams),
     })
       .then((r) => r.json())
-      .then(({ flights }) => setFlights(flights))
+      .then((data) => {
+        if (data.error) setError(data.error);
+        else setFlights(data.flights ?? []);
+      })
+      .catch((err) => setError(err.message ?? 'Failed to load flights'))
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -38,6 +43,15 @@ export default function ResultsPage() {
     return (
       <div className="flex items-center justify-center h-64">
         <Loader2 className="animate-spin text-blue-600" size={32} />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-3xl mx-auto px-4 py-8">
+        <p className="text-red-600 font-medium">Search failed</p>
+        <p className="text-sm text-gray-500 mt-1">{error}</p>
       </div>
     );
   }
@@ -63,14 +77,21 @@ export default function ResultsPage() {
       </div>
 
       <div className="space-y-3">
-        {flights.map((flight) => (
-          <FlightCard
-            key={flight.id}
-            flight={flight}
-            selectedClass={searchParams?.class ?? 'economy'}
-            onSelect={handleSelect}
-          />
-        ))}
+        {flights.length === 0 ? (
+          <div className="text-center py-16 text-gray-400">
+            <p className="text-lg font-medium text-gray-500">No flights found</p>
+            <p className="text-sm mt-1">Try a different date or adjust your search.</p>
+          </div>
+        ) : (
+          flights.map((flight) => (
+            <FlightCard
+              key={flight.id}
+              flight={flight}
+              selectedClass={searchParams?.class ?? 'economy'}
+              onSelect={handleSelect}
+            />
+          ))
+        )}
       </div>
     </div>
   );

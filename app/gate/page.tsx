@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { Plane, Users, CheckCircle, Clock, DoorOpen } from 'lucide-react';
+import { AirlineLogo } from '@/components/AirlineLogo';
 
 interface GateFlight {
   id: string;
@@ -86,7 +87,10 @@ export default function GatePage() {
               }`}
             >
               <div className="flex items-center justify-between mb-2">
-                <p className="font-bold text-gray-900">{f.flight}</p>
+                <div className="flex items-center gap-2">
+                  <AirlineLogo code={f.flight.match(/^[A-Z]+/)?.[0] ?? ''} name={f.airline} size={22} />
+                  <p className="font-bold text-gray-900">{f.flight}</p>
+                </div>
                 <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[f.status]}`}>
                   {f.status}
                 </span>
@@ -107,7 +111,7 @@ export default function GatePage() {
             <div className="flex items-start justify-between">
               <div>
                 <div className="flex items-center gap-3 mb-1">
-                  <Plane size={18} className="text-blue-600" />
+                  <AirlineLogo code={selected.flight.match(/^[A-Z]+/)?.[0] ?? ''} name={selected.airline} size={32} />
                   <h2 className="text-xl font-bold text-gray-900">{selected.flight}</h2>
                   <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_STYLES[selected.status]}`}>
                     {selected.status}

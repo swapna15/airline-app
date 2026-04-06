@@ -7,6 +7,7 @@ const base: PriceBreakdown = {
   taxes: 48,
   fees: 15,
   seatFees: 0,
+  baggageFees: 0,
   total: 383,
 };
 

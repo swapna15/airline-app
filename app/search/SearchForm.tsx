@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Sparkles, Users, ChevronDown } from 'lucide-react';
 import { AIRPORTS } from '@/utils/mockData';
 import { useBooking } from '@/utils/bookingStore';
-import type { SearchParams, CabinClass } from '@/types/flight';
+import type { SearchParams, Airport, CabinClass } from '@/types/flight';
 
 function PassengerPicker({
   passengers,
@@ -95,6 +95,100 @@ function PassengerPicker({
   );
 }
 
+function AirportTypeahead({
+  id,
+  value,
+  onChange,
+  placeholder,
+}: {
+  id: string;
+  value: Airport | null;
+  onChange: (a: Airport | null) => void;
+  placeholder: string;
+}) {
+  const [query, setQuery] = useState(value ? `${value.city} (${value.code})` : '');
+  const [suggestions, setSuggestions] = useState<Airport[]>([]);
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Only sync display when a real airport is set externally (e.g. via NL search).
+  // Do NOT reset query to '' when value becomes null — that would clear the input
+  // mid-typing since handleChange calls onChange(null) on every keystroke.
+  useEffect(() => {
+    if (value) setQuery(`${value.city} (${value.code})`);
+  }, [value]);
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener('mousedown', handleClick);
+    return () => document.removeEventListener('mousedown', handleClick);
+  }, []);
+
+  const search = useCallback((q: string) => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      const res = await fetch(`/api/airports/suggest?q=${encodeURIComponent(q)}`);
+      const data: Airport[] = await res.json();
+      setSuggestions(data);
+      setOpen(data.length > 0);
+    }, q.length === 0 ? 0 : 250);
+  }, []);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const q = e.target.value;
+    setQuery(q);
+    // Only clear the parent value when the input is fully emptied
+    if (!q.trim()) onChange(null);
+    search(q);
+  };
+
+  const handleFocus = () => {
+    if (!query.trim()) search('');
+    else if (suggestions.length > 0) setOpen(true);
+  };
+
+  const handleSelect = (airport: Airport) => {
+    onChange(airport);
+    setQuery(`${airport.city} (${airport.code})`);
+    setOpen(false);
+    setSuggestions([]);
+  };
+
+  return (
+    <div ref={ref} className="relative">
+      <input
+        id={id}
+        type="text"
+        autoComplete="off"
+        className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-blue-400"
+        placeholder={placeholder}
+        value={query}
+        onChange={handleChange}
+        onFocus={handleFocus}
+      />
+      {open && (
+        <ul className="absolute z-30 top-full mt-1 left-0 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+          {suggestions.map((a) => (
+            <li key={a.code}>
+              <button
+                type="button"
+                className="w-full text-left px-3 py-2 text-sm hover:bg-blue-50 flex items-baseline gap-2"
+                onMouseDown={() => handleSelect(a)}
+              >
+                <span className="font-medium text-gray-900">{a.code}</span>
+                <span className="text-gray-500 truncate">{a.city}{a.country ? `, ${a.country}` : ''}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export function SearchForm() {
   const router = useRouter();
   const { setSearchParams } = useBooking();
@@ -130,16 +224,43 @@ export function SearchForm() {
       const json = result.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
       const parsed = JSON.parse(json);
 
+      // Build airport objects from parsed data directly (not from the static AIRPORTS list)
+      const origin = parsed.origin?.code
+        ? { code: parsed.origin.code, name: parsed.origin.name ?? parsed.origin.code, city: parsed.origin.city ?? parsed.origin.code, country: parsed.origin.country ?? '' }
+        : null;
+      const destination = parsed.destination?.code
+        ? { code: parsed.destination.code, name: parsed.destination.name ?? parsed.destination.code, city: parsed.destination.city ?? parsed.destination.code, country: parsed.destination.country ?? '' }
+        : null;
+      const tripType: 'oneWay' | 'roundTrip' = parsed.tripType ?? 'oneWay';
+      const departureDate: string = parsed.departureDate ?? '';
+      const passengers = parsed.passengers ?? { adults: 1, children: 0, infants: 0 };
+      const cabinClass: CabinClass = parsed.class ?? 'economy';
+
       setForm((prev) => ({
         ...prev,
-        origin: AIRPORTS.find((a) => a.code === parsed.origin?.code) ?? prev.origin,
-        destination: AIRPORTS.find((a) => a.code === parsed.destination?.code) ?? prev.destination,
-        departureDate: parsed.departureDate ?? prev.departureDate,
+        origin: origin ?? prev.origin,
+        destination: destination ?? prev.destination,
+        departureDate: departureDate || prev.departureDate,
         returnDate: parsed.returnDate ?? prev.returnDate,
-        passengers: parsed.passengers ?? prev.passengers,
-        class: (parsed.class as CabinClass) ?? prev.class,
-        tripType: parsed.tripType ?? prev.tripType,
+        passengers,
+        class: cabinClass,
+        tripType,
       }));
+
+      // Auto-search if we have enough data — no need to click Search Flights manually
+      if (origin && destination && departureDate) {
+        const params: SearchParams = {
+          origin,
+          destination,
+          departureDate,
+          passengers,
+          class: cabinClass,
+          tripType,
+          ...(tripType === 'roundTrip' && parsed.returnDate ? { returnDate: parsed.returnDate } : {}),
+        };
+        setSearchParams(params);
+        router.push('/search/results');
+      }
     } catch (err) {
       setNlError(err instanceof Error ? err.message : 'AI search failed. Try again.');
     } finally {
@@ -206,29 +327,23 @@ export function SearchForm() {
         {/* Origin */}
         <div>
           <label htmlFor="origin" className="block text-xs font-medium text-gray-500 mb-1">From</label>
-          <select
+          <AirportTypeahead
             id="origin"
-            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-blue-400"
-            value={form.origin?.code ?? ''}
-            onChange={(e) => setForm((p) => ({ ...p, origin: AIRPORTS.find((a) => a.code === e.target.value) ?? null }))}
-          >
-            <option value="">Select origin</option>
-            {AIRPORTS.map((a) => <option key={a.code} value={a.code}>{a.city} ({a.code})</option>)}
-          </select>
+            value={form.origin}
+            onChange={(a) => setForm((p) => ({ ...p, origin: a }))}
+            placeholder="City or airport code"
+          />
         </div>
 
         {/* Destination */}
         <div>
           <label htmlFor="destination" className="block text-xs font-medium text-gray-500 mb-1">To</label>
-          <select
+          <AirportTypeahead
             id="destination"
-            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm focus:outline-none focus:border-blue-400"
-            value={form.destination?.code ?? ''}
-            onChange={(e) => setForm((p) => ({ ...p, destination: AIRPORTS.find((a) => a.code === e.target.value) ?? null }))}
-          >
-            <option value="">Select destination</option>
-            {AIRPORTS.map((a) => <option key={a.code} value={a.code}>{a.city} ({a.code})</option>)}
-          </select>
+            value={form.destination}
+            onChange={(a) => setForm((p) => ({ ...p, destination: a }))}
+            placeholder="City or airport code"
+          />
         </div>
 
         {/* Departure date */}

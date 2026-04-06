@@ -28,6 +28,12 @@ export function PriceSummary({ breakdown }: Props) {
           <span>${breakdown.seatFees.toLocaleString()}</span>
         </div>
       )}
+      {breakdown.baggageFees > 0 && (
+        <div className="flex justify-between text-gray-600">
+          <span>Checked baggage</span>
+          <span>${breakdown.baggageFees.toLocaleString()}</span>
+        </div>
+      )}
       <div className="border-t border-gray-200 pt-2 flex justify-between font-bold text-gray-900 text-base">
         <span>Total</span>
         <span className="text-blue-600">${breakdown.total.toLocaleString()}</span>
