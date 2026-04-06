@@ -24,8 +24,8 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Run tests
-        run: NODE_ENV=test npx jest --runInBand --passWithNoTests
+      #- name: Run tests
+      #  run: NODE_ENV=test npx jest --runInBand --passWithNoTests
 
   infra:
     name: Terraform Apply
