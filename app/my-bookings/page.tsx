@@ -153,7 +153,7 @@ function BookingCard({ b, tab }: { b: SavedBooking; tab: Tab }) {
 
 export default function MyBookingsPage() {
   const router = useRouter();
-  const { data: session, status } = useSession();
+  const { status } = useSession();
   const [bookings, setBookings] = useState<SavedBooking[]>([]);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<Tab>('upcoming');

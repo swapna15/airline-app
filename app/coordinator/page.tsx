@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Plane, AlertTriangle, Clock, Sparkles, Loader2 } from 'lucide-react';
+import { AlertTriangle, Clock, Sparkles, Loader2 } from 'lucide-react';
 import { AirlineLogo } from '@/components/AirlineLogo';
 
 interface CoordFlight {

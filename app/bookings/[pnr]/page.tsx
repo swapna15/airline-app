@@ -172,7 +172,7 @@ export default function BookingDetailPage() {
     } finally {
       setAiLoading(false);
     }
-  }, []);
+  }, [tenant.id, preferences]);
 
   // ── Cancellation ─────────────────────────────────────────────────────────────
   const handleCancel = async () => {

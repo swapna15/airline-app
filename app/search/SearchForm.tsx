@@ -3,7 +3,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Search, Sparkles, Users, ChevronDown } from 'lucide-react';
-import { AIRPORTS } from '@/utils/mockData';
 import { useBooking } from '@/utils/bookingStore';
 import type { SearchParams, Airport, CabinClass } from '@/types/flight';
 
