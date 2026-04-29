@@ -2,81 +2,96 @@ import type { FuelPriceProvider } from './types';
 import { MockFuelPriceProvider } from './mock';
 import { CsvFuelPriceProvider } from './csv';
 import { ApiFuelPriceProvider, type AuthMethod } from './api';
+import { getIntegrationConfig, configHash } from '../config-store';
 
 /**
- * Provider selection from env vars.
+ * Provider selection priority:
+ *   1. integration_configs row for `fuel_price` (set via admin UI)
+ *   2. env vars (FUEL_PRICE_PROVIDER, …)
+ *   3. mock
  *
- *   FUEL_PRICE_PROVIDER     = 'mock' (default) | 'csv' | 'api_fms'
- *
- * For `csv`:
- *   FUEL_PRICE_CSV_URI      = s3://… | file://… | https://…
- *   FUEL_PRICE_CSV_AUTH     = 'Bearer …' | 'Basic …'           (optional, https only)
- *
- * For `api_fms`:
- *   FUEL_PRICE_API_URL          = full bulk endpoint URL
- *   FUEL_PRICE_API_AUTH_METHOD  = 'bearer' (default) | 'basic' | 'header'
- *   FUEL_PRICE_API_TOKEN        = env://VAR | secretsmanager:arn:… | <verbatim>
- *   FUEL_PRICE_API_TOKEN_HEADER = X-API-Key (only when AUTH_METHOD=header)
- *
- * Common:
- *   FUEL_PRICE_CACHE_TTL    = 60                               (optional, seconds)
- *
- * The next phase will read these from `integration_configs` keyed by tenant.
- * The resolver is memoised so a single Lambda warm instance reuses the cache.
+ * `buildFuelPriceProvider({ provider, config })` is exported separately so
+ * the admin "Test connection" path can instantiate a provider from
+ * unsaved config and run its health check before persisting.
  */
 
-let cached: FuelPriceProvider | null = null;
+export interface BuildArgs {
+  provider: string;
+  config: Record<string, unknown>;
+  cacheTtlSec?: number;
+}
+
+export function buildFuelPriceProvider({ provider, config, cacheTtlSec }: BuildArgs): FuelPriceProvider {
+  switch (provider) {
+    case 'mock':
+      return new MockFuelPriceProvider();
+    case 'csv':
+    case 's3_csv': {
+      const uri = String(config.uri ?? '');
+      if (!uri) throw new Error(`provider=${provider} requires config.uri`);
+      return new CsvFuelPriceProvider({
+        uri,
+        cacheTtlSec,
+        authorization: config.authorization ? String(config.authorization) : undefined,
+        region:        config.region ? String(config.region) : process.env.AWS_REGION,
+      });
+    }
+    case 'api_fms':
+    case 'api': {
+      const url = String(config.url ?? '');
+      const tokenRef = String(config.tokenRef ?? '');
+      if (!url || !tokenRef) throw new Error('api_fms requires config.url and config.tokenRef');
+      const am = String(config.authMethod ?? 'bearer').toLowerCase();
+      if (am !== 'bearer' && am !== 'basic' && am !== 'header') throw new Error(`unknown authMethod: ${am}`);
+      return new ApiFuelPriceProvider({
+        url,
+        authMethod:  am as AuthMethod,
+        tokenRef,
+        tokenHeader: config.tokenHeader ? String(config.tokenHeader) : undefined,
+        cacheTtlSec,
+        region:      config.region ? String(config.region) : process.env.AWS_REGION,
+      });
+    }
+    default:
+      throw new Error(`unknown fuel_price provider: ${provider}`);
+  }
+}
+
+function envConfig(): { provider: string; config: Record<string, unknown> } {
+  const which = (process.env.FUEL_PRICE_PROVIDER ?? 'mock').toLowerCase();
+  switch (which) {
+    case 'csv':
+    case 's3_csv':
+      return { provider: which, config: { uri: process.env.FUEL_PRICE_CSV_URI ?? '', authorization: process.env.FUEL_PRICE_CSV_AUTH } };
+    case 'api':
+    case 'api_fms':
+      return { provider: 'api_fms', config: {
+        url:         process.env.FUEL_PRICE_API_URL ?? '',
+        authMethod:  process.env.FUEL_PRICE_API_AUTH_METHOD ?? 'bearer',
+        tokenRef:    process.env.FUEL_PRICE_API_TOKEN ?? '',
+        tokenHeader: process.env.FUEL_PRICE_API_TOKEN_HEADER,
+      } };
+    default:
+      return { provider: 'mock', config: {} };
+  }
+}
+
+let cached: { provider: FuelPriceProvider; hash: string } | null = null;
 
 export function resetFuelPriceProvider(): void {
   cached = null;
 }
 
 export function getFuelPriceProvider(): FuelPriceProvider {
-  if (cached) return cached;
+  const stored = getIntegrationConfig('fuel_price');
+  const effective = stored && stored.enabled ? { provider: stored.provider, config: stored.config } : envConfig();
+  const hash = configHash(effective);
 
-  const which = (process.env.FUEL_PRICE_PROVIDER ?? 'mock').toLowerCase();
+  if (cached && cached.hash === hash) return cached.provider;
+
   const ttlRaw = parseInt(process.env.FUEL_PRICE_CACHE_TTL ?? '', 10);
   const cacheTtlSec = Number.isFinite(ttlRaw) ? ttlRaw : 60;
-
-  switch (which) {
-    case 'csv':
-    case 's3_csv': {
-      const uri = process.env.FUEL_PRICE_CSV_URI;
-      if (!uri) {
-        throw new Error(`FUEL_PRICE_PROVIDER=${which} requires FUEL_PRICE_CSV_URI`);
-      }
-      cached = new CsvFuelPriceProvider({
-        uri,
-        cacheTtlSec,
-        authorization: process.env.FUEL_PRICE_CSV_AUTH,
-        region:        process.env.AWS_REGION,
-      });
-      return cached;
-    }
-    case 'api_fms':
-    case 'api': {
-      const url = process.env.FUEL_PRICE_API_URL;
-      const tokenRef = process.env.FUEL_PRICE_API_TOKEN;
-      if (!url || !tokenRef) {
-        throw new Error('FUEL_PRICE_PROVIDER=api_fms requires FUEL_PRICE_API_URL and FUEL_PRICE_API_TOKEN');
-      }
-      const authMethodRaw = (process.env.FUEL_PRICE_API_AUTH_METHOD ?? 'bearer').toLowerCase();
-      if (authMethodRaw !== 'bearer' && authMethodRaw !== 'basic' && authMethodRaw !== 'header') {
-        throw new Error(`unknown FUEL_PRICE_API_AUTH_METHOD: ${authMethodRaw}`);
-      }
-      cached = new ApiFuelPriceProvider({
-        url,
-        authMethod:  authMethodRaw as AuthMethod,
-        tokenRef,
-        tokenHeader: process.env.FUEL_PRICE_API_TOKEN_HEADER,
-        cacheTtlSec,
-        region:      process.env.AWS_REGION,
-      });
-      return cached;
-    }
-    case 'mock':
-    default:
-      cached = new MockFuelPriceProvider();
-      return cached;
-  }
+  const provider = buildFuelPriceProvider({ ...effective, cacheTtlSec });
+  cached = { provider, hash };
+  return provider;
 }

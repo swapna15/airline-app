@@ -146,9 +146,17 @@ export default function AdminPage() {
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Airline Admin</h1>
-        <p className="text-sm text-gray-500 mt-1">Manage users, roles, and airline configuration</p>
+      <div className="mb-6 flex items-start justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-gray-900">Airline Admin</h1>
+          <p className="text-sm text-gray-500 mt-1">Manage users, roles, and airline configuration</p>
+        </div>
+        <a
+          href="/admin/integrations"
+          className="px-3 py-2 rounded-lg border border-gray-200 text-sm hover:bg-gray-50 flex items-center gap-2"
+        >
+          <Settings size={14} className="text-gray-500" /> Data integrations
+        </a>
       </div>
 
       {/* Stats */}

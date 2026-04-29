@@ -152,6 +152,7 @@ Per-tenant data feeds (fuel prices, MEL, crew, fleet, maintenance) flow through 
 - `lib/integrations/cache.ts` — TTL cache attached to `globalThis`, request-coalescing in-flight promises (HMR-safe, same convention as `planner-store.ts`)
 - `lib/integrations/csv.ts` — RFC-4180 CSV parser shared across domains
 - `lib/integrations/secrets.ts` — secret reference resolver. Forms: `env://VAR`, `secretsmanager:arn:aws:secretsmanager:…` (opaque dynamic import — install `@aws-sdk/client-secrets-manager` only when used), or verbatim. Token rotation cadence is the provider's cache TTL
+- `lib/integrations/config-store.ts` — process-scoped persistent integration config (HMR-safe `globalThis` Map; phase-5 swap target is migration `005_integration_configs.sql`). Resolvers consult the store first and fall back to env vars. Admin UI at `/admin/integrations` writes to the store via `PUT/DELETE /api/admin/integrations/{kind}`; "Test connection" hits `POST /api/admin/integrations/{kind}/test` which builds a provider from unsaved config and runs its health check. Saving busts the resolver's cached provider via `resetXxxProvider()` so the next request picks up the change immediately
 
 **Domain wiring** (fuel prices, MEL deferrals, and crew roster + assignments — all share the same shape):
 
