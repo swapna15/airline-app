@@ -120,7 +120,7 @@ The Lambda enforces `flight_planner` or `admin` role from the API Gateway author
 | `/planner` (Plans) | `[phase]` + `plans/[flightId]` + `…/reviews` | Per-flight stepper (Phases A–D above) |
 | `/planner/divert` | `POST /api/planner/divert` | Rank every airport in `lib/icao.ts` against the destination by great-circle distance, runway adequacy (`requiredRunwayFt(aircraft)`), customs/fuel availability, ETOPS adequacy, and live METAR `fltCat`. When `etopsRequired` (cross-country twin + > 1,500 nm), non-ETOPS candidates take a heavy score penalty. Reason (`medical`/`mechanical`/`weather`/`fuel`) reweights the score further |
 | `/planner/cascade` | `POST /api/planner/cascade` | Walks `ROTATIONS` in `lib/fleet.ts`, propagating delay forward. Slack between consecutive legs (`plannedGround − minGroundMin`) absorbs delay; otherwise it propagates fully to the next arrival |
-| `/planner/tankering` | `POST /api/planner/tankering` | Compares origin vs. destination jet-A prices from `lib/fuelprices.ts`, applies a 3.5%/hr burn-to-carry penalty against the trip from `lib/perf.ts`, returns net USD savings + risk flags (MTOW headroom, thin margin, inverted-differential). Recommends `tanker` only when net > 0 |
+| `/planner/tankering` | `POST /api/planner/tankering` | Compares origin vs. destination jet-A prices via the pluggable `lib/fuelprices.ts` façade (mock by default; FMS-style CSV via `FUEL_PRICE_PROVIDER=csv` + `FUEL_PRICE_CSV_URI=s3:// \| file:// \| https://`). Applies a 3.5%/hr burn-to-carry penalty against the trip from `lib/perf.ts`. Surfaces price components (base + diff + into-plane + tax), supplier, contract ref, and asOf when the feed provides them. Risk flags: MTOW headroom, thin margin, inverted differential, stale price (> 24h). Recommends `tanker` only when net > 0 |
 | `/planner/mel` | `POST /api/planner/mel` | Cross-references the tail&rsquo;s deferred items from `lib/mel.ts` against the route. Auto-derives `oceanic` (Δlon > 30° + dist > 1500 nm), `etopsRequired` (oceanic + twin-engine type). Planner can override `knownIcing`, `imcBelowFreezing`, `thunderstormsForecast`, `destCatIIIRequired`, `arrivalIsNight` via the brief overrides toggle. Returns `{ conflicts: [{severity: block|warn}], advisories, mtowReductionKg, flCeiling, dispatchAllowed }` |
 | `/planner/deconflict` | `GET /api/planner/deconflict` | Walks every rotation in `lib/fleet.ts` against `MAINTENANCE_WINDOWS` + `lib/crew.ts` (ROSTER + ASSIGNMENTS). 8 conflict types: `maintenance`, `unstaffed`, `unqualified`, `fdp_exceeded` (>14h), `flight_time_exceeded` (>9h), `insufficient_rest` (<10h), `double_booked` (broken leg chain), `base_mismatch` (warn). FDP/flight-time computed from `fuelEstimate.blockTimeMin` per leg + report/debrief buffers from `lib/crew.ts` |
 | `/planner/eod` | `GET /api/planner/eod` | Read-only roll-up of plan statuses + reviews from `lib/planner-store.ts` plus the rotation catalogue. Pure aggregation, no agent calls |
@@ -142,6 +142,59 @@ The script joins `airports.csv` + `runways.csv` from https://davidmegginson.gith
 `country` (ISO 3166-1 alpha-2, e.g. `US`, `GB`, `JP`) is also exposed; the divert + MEL tools use it to detect oceanic routes (cross-country + > 1,500 nm). The diversion advisor uses `findCandidatesWithin(dest, 1000nm, requiredRunwayFt)` from `lib/perf.ts` to filter the pool before the METAR fetch — avoids hammering AviationWeather with 3,400-ICAO URLs.
 
 **Important data note**: Duffel is *not* a planning data source — it's a retail booking aggregator and stays scoped to passenger search. Planning data must come from AviationWeather / FAA / a perf engine / fleet+crew systems.
+
+### Pluggable enterprise integrations (`lib/integrations/`)
+
+Per-tenant data feeds (fuel prices, MEL, crew, fleet, maintenance) flow through a small provider framework so the same dispatcher tool can consume mock data, an FMS CSV drop, or a live REST API without code changes.
+
+- `lib/integrations/types.ts` — `Provider` interface (`name`, `healthCheck()`, optional `refresh()`)
+- `lib/integrations/fetcher.ts` — URI-scheme dispatch: `s3://bucket/key`, `file:///abs/path`, `https://...`. The `s3://` path uses an opaque dynamic import so `@aws-sdk/client-s3` is **not** required at build time — install it only when an S3 source is configured
+- `lib/integrations/cache.ts` — TTL cache attached to `globalThis`, request-coalescing in-flight promises (HMR-safe, same convention as `planner-store.ts`)
+- `lib/integrations/csv.ts` — RFC-4180 CSV parser shared across domains
+- `lib/integrations/secrets.ts` — secret reference resolver. Forms: `env://VAR`, `secretsmanager:arn:aws:secretsmanager:…` (opaque dynamic import — install `@aws-sdk/client-secrets-manager` only when used), or verbatim. Token rotation cadence is the provider's cache TTL
+
+**Domain wiring** (currently for fuel prices; MEL/crew planned to follow the same shape):
+
+```
+lib/integrations/fuelprices/
+  types.ts      → FuelPrice (FMS shape: components, currency, supplier, contractRef, asOf, validUntil, source)
+  mock.ts       → MockFuelPriceProvider — wraps the original in-repo TABLE
+  csv.ts        → CsvFuelPriceProvider  — reads any URI scheme, caches per uri
+  api.ts        → ApiFuelPriceProvider  — REST + JWT/basic/header auth, envelope unwrap, FMS-shape mapping
+  resolver.ts   → env-based selection (later: read from `integration_configs` per tenant)
+lib/fuelprices.ts → public façade (`getFuelPrice`, `listFuelPrices`, `fuelPriceProviderHealth`)
+```
+
+**Env contract** (provider selection until the admin UI lands):
+
+Common:
+| Var | Purpose |
+|---|---|
+| `FUEL_PRICE_PROVIDER` | `mock` (default) \| `csv` \| `api_fms` |
+| `FUEL_PRICE_CACHE_TTL` | seconds, default 60 |
+
+CSV provider:
+| Var | Purpose |
+|---|---|
+| `FUEL_PRICE_CSV_URI` | required: `s3://…`, `file://…`, or `https://…` |
+| `FUEL_PRICE_CSV_AUTH` | optional `Authorization` header for https endpoints (e.g. `Bearer eyJ…`) |
+
+API provider (`api_fms`):
+| Var | Purpose |
+|---|---|
+| `FUEL_PRICE_API_URL` | required: full bulk endpoint URL |
+| `FUEL_PRICE_API_AUTH_METHOD` | `bearer` (default) \| `basic` \| `header` |
+| `FUEL_PRICE_API_TOKEN` | required: `env://VAR` \| `secretsmanager:arn:…` \| verbatim |
+| `FUEL_PRICE_API_TOKEN_HEADER` | required when AUTH_METHOD=header (e.g. `X-API-Key`) |
+
+CSV schema (FMS-shape — extras tolerated, missing optional columns OK):
+
+```
+icao,iata,supplier,jet_type,base_usd_usg,diff_usd_usg,into_plane_usd_usg,tax_usd_usg,
+total_usd_usg,currency_local,total_local,as_of_utc,valid_until_utc,contract_ref
+```
+
+API JSON shape — bare array OR enveloped under `data` / `results` / `prices` / `items`. Each record uses either camelCase (`totalPerUSG`, `asOf`, `contractRef`) or the snake_case CSV field names — both are tolerated. `scripts/mock-fms-api.mjs` is a 50-line reference server for local testing; `scripts/sample-fuel-prices.csv` is the equivalent for the CSV provider.
 
 ### AWS Serverless Backend (`infra/`)
 

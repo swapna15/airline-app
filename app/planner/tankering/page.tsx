@@ -11,10 +11,21 @@ const FLIGHTS = [
   { flight: 'EK5500', origin: 'JFK', destination: 'DXB', aircraft: 'Airbus A380-800' },
 ];
 
+interface PriceSide {
+  icao: string;
+  iata: string;
+  priceUsdPerUSG: number;
+  currency?: string;
+  components?: { base: number; differential: number; intoPlane: number; tax: number };
+  supplier?: string;
+  contractRef?: string;
+  asOf?: string;
+}
+
 interface TankeringResponse {
   flight: string;
-  origin: { icao: string; iata: string; priceUsdPerUSG: number };
-  destination: { icao: string; iata: string; priceUsdPerUSG: number };
+  origin: PriceSide;
+  destination: PriceSide;
   tripHours: number;
   tripFuelKg: number;
   blockFuelKg: number;
@@ -155,16 +166,8 @@ export default function TankeringPage() {
 
           {/* Price grid */}
           <div className="grid grid-cols-2 gap-4">
-            <div className="border border-gray-200 rounded-xl p-4">
-              <div className="text-xs text-gray-500 uppercase tracking-wide">Origin · {result.origin.iata}</div>
-              <div className="mt-1 text-2xl font-bold">${result.origin.priceUsdPerUSG.toFixed(2)}<span className="text-sm font-normal text-gray-500">/USG</span></div>
-              <div className="text-xs text-gray-400 mt-0.5">{result.origin.icao}</div>
-            </div>
-            <div className="border border-gray-200 rounded-xl p-4">
-              <div className="text-xs text-gray-500 uppercase tracking-wide">Destination · {result.destination.iata}</div>
-              <div className="mt-1 text-2xl font-bold">${result.destination.priceUsdPerUSG.toFixed(2)}<span className="text-sm font-normal text-gray-500">/USG</span></div>
-              <div className="text-xs text-gray-400 mt-0.5">{result.destination.icao}</div>
-            </div>
+            <PriceCard label="Origin" side={result.origin} />
+            <PriceCard label="Destination" side={result.destination} />
           </div>
 
           {/* Numbers panel */}
@@ -208,6 +211,35 @@ function Stat({ label, value, sub, emphasize }: { label: string; value: string; 
       <div className="text-[10px] text-gray-500 uppercase tracking-wide">{label}</div>
       <div className={`mt-0.5 font-semibold ${color}`}>{value}</div>
       {sub && <div className="text-[10px] text-gray-400">{sub}</div>}
+    </div>
+  );
+}
+
+function PriceCard({ label, side }: { label: string; side: PriceSide }) {
+  return (
+    <div className="border border-gray-200 rounded-xl p-4">
+      <div className="text-xs text-gray-500 uppercase tracking-wide">{label} · {side.iata}</div>
+      <div className="mt-1 text-2xl font-bold">
+        ${side.priceUsdPerUSG.toFixed(2)}
+        <span className="text-sm font-normal text-gray-500">/USG</span>
+      </div>
+      <div className="text-xs text-gray-400 mt-0.5">{side.icao}</div>
+
+      {side.components && (
+        <ul className="mt-3 space-y-0.5 text-[11px] text-gray-600">
+          <li>base <span className="font-medium float-right">${side.components.base.toFixed(2)}</span></li>
+          <li>differential <span className="font-medium float-right">${side.components.differential.toFixed(2)}</span></li>
+          <li>into-plane <span className="font-medium float-right">${side.components.intoPlane.toFixed(2)}</span></li>
+          <li>tax <span className="font-medium float-right">${side.components.tax.toFixed(2)}</span></li>
+        </ul>
+      )}
+
+      {(side.supplier || side.contractRef) && (
+        <div className="mt-3 pt-2 border-t border-gray-100 text-[11px] text-gray-500 flex flex-wrap gap-x-3">
+          {side.supplier   && <span>supplier <span className="font-medium text-gray-700">{side.supplier}</span></span>}
+          {side.contractRef && <span>contract <span className="font-medium text-gray-700">{side.contractRef}</span></span>}
+        </div>
+      )}
     </div>
   );
 }
