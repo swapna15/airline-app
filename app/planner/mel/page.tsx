@@ -19,6 +19,11 @@ interface DeferredView {
   category: 'A' | 'B' | 'C' | 'D';
   daysDeferred: number;
   restrictions: Array<{ kind: string; [k: string]: unknown }>;
+  description?: string;
+  dueAt?: string;
+  partsOnOrder?: boolean;
+  placardInstalled?: boolean;
+  releasedBy?: string;
 }
 
 interface MELResponse {
@@ -252,9 +257,18 @@ export default function MELPage() {
                 </thead>
                 <tbody>
                   {result.deferred.map((d) => (
-                    <tr key={d.melId} className="border-t border-gray-100">
+                    <tr key={d.melId} className="border-t border-gray-100 align-top">
                       <td className="py-2 text-xs text-gray-500">{d.ataChapter} <span className="text-gray-400">— {d.ataName}</span></td>
-                      <td className="py-2">{d.item}</td>
+                      <td className="py-2">
+                        <div>{d.item}</div>
+                        {d.description && <div className="text-[11px] text-gray-500 mt-0.5">{d.description}</div>}
+                        <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[10px] text-gray-500">
+                          {d.dueAt && <span>due {new Date(d.dueAt).toISOString().slice(0, 10)}</span>}
+                          {d.partsOnOrder     && <span className="text-amber-700">parts on order</span>}
+                          {d.placardInstalled && <span className="text-blue-700">placarded</span>}
+                          {d.releasedBy       && <span>by {d.releasedBy}</span>}
+                        </div>
+                      </td>
                       <td className="py-2">
                         <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${CAT_PILL[d.category]}`}>{d.category}</span>
                       </td>

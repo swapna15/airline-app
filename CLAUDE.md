@@ -153,7 +153,7 @@ Per-tenant data feeds (fuel prices, MEL, crew, fleet, maintenance) flow through 
 - `lib/integrations/csv.ts` — RFC-4180 CSV parser shared across domains
 - `lib/integrations/secrets.ts` — secret reference resolver. Forms: `env://VAR`, `secretsmanager:arn:aws:secretsmanager:…` (opaque dynamic import — install `@aws-sdk/client-secrets-manager` only when used), or verbatim. Token rotation cadence is the provider's cache TTL
 
-**Domain wiring** (currently for fuel prices; MEL/crew planned to follow the same shape):
+**Domain wiring** (fuel prices, MEL deferrals, and crew roster + assignments — all share the same shape):
 
 ```
 lib/integrations/fuelprices/
@@ -195,6 +195,34 @@ total_usd_usg,currency_local,total_local,as_of_utc,valid_until_utc,contract_ref
 ```
 
 API JSON shape — bare array OR enveloped under `data` / `results` / `prices` / `items`. Each record uses either camelCase (`totalPerUSG`, `asOf`, `contractRef`) or the snake_case CSV field names — both are tolerated. `scripts/mock-fms-api.mjs` is a 50-line reference server for local testing; `scripts/sample-fuel-prices.csv` is the equivalent for the CSV provider.
+
+**MEL deferrals** (`lib/integrations/mel/`):
+
+```
+MEL_PROVIDER             = mock (default) | csv | api_amos | api_trax | api_camo
+MEL_CSV_URI              = s3://… | file://… | https://…
+MEL_API_URL              = https://mis.airline.internal/deferrals
+MEL_API_AUTH_METHOD      = bearer (default) | basic | header
+MEL_API_TOKEN            = env://VAR | secretsmanager:arn:… | <verbatim>
+```
+
+Required CSV cols: `tail`, `mel_id`, `deferred_at`. Optional: `description`, `due_at`, `airframe_hours_at_open`, `airframe_cycles_at_open`, `parts_on_order`, `placard_installed`, `released_by`. Reference fixtures: `scripts/sample-mel-deferrals.csv`, `scripts/mock-mis-api.mjs` (port 4001).
+
+**Crew** (`lib/integrations/crew/`) — two collections (roster + assignments) on independent caches because real systems export them on different cadences:
+
+```
+CREW_PROVIDER             = mock (default) | csv | api_sabre | api_jeppesen | api_aims
+CREW_ROSTER_URI           = s3://…/roster.csv
+CREW_ASSIGNMENTS_URI      = s3://…/assignments.csv
+CREW_API_ROSTER_URL       = https://crew.airline.internal/roster
+CREW_API_ASSIGNMENTS_URL  = https://crew.airline.internal/pairings
+CREW_API_AUTH_METHOD      = bearer | basic | header
+CREW_API_TOKEN            = env://VAR | secretsmanager:arn:… | <verbatim>
+```
+
+Roster CSV cols: `id`, `name`, `role` (CAP|FO), `base`, `type_ratings` (`,`/`|`-separated), `prior_fdp_min`, `prior_flight_time_min`, `rest_min_since_last_duty`, optional `license_number`, `medical_expires_at`, `line_check_expires_at`, `status` (active|sick|reserve|leave). Assignments CSV cols: `crew_id`, `flight`. Reference fixtures: `scripts/sample-crew-roster.csv`, `scripts/sample-crew-assignments.csv`, `scripts/mock-crew-api.mjs` (port 4002).
+
+`lib/crew.ts` exposes async `getRoster()` / `getAssignments()` plus pure helpers (`crewById`, `assignmentsForFlight`, `flightsForCrew`) that operate on a fetched snapshot — callers fetch once per request, then walk the snapshot synchronously.
 
 ### AWS Serverless Backend (`infra/`)
 

@@ -1,14 +1,21 @@
 /**
- * Mock Minimum Equipment List (MEL) catalogue + per-tail deferrals.
+ * MEL catalogue + assessor.
  *
- * Real airlines source this from the maintenance system (AMOS, TRAX, FlyDocs,
- * Ramco). Production wiring: replace `getDeferredItems(tail)` with a REST call
- * or a nightly CSV/Parquet drop into the planner's tenant bucket.
+ * Catalogue lives in this file (relatively static, per-airline). Per-tail
+ * deferrals come from a pluggable provider (`lib/integrations/mel/`) chosen
+ * at runtime — mock by default, CSV/S3 or AMOS/TRAX/CAMO REST when
+ * configured. See `MEL_PROVIDER` in CLAUDE.md.
  *
  * The catalogue below covers the operationally-impactful items planners
  * see most often. Restrictions are encoded structurally so the assessor can
  * mechanically check them against route facts — no string parsing.
  */
+
+import { getMelProvider } from './integrations/mel/resolver';
+export type { DeferredItem } from './integrations/mel/types';
+export { getMelProvider, resetMelProvider } from './integrations/mel/resolver';
+import type { DeferredItem } from './integrations/mel/types';
+import type { ProviderHealthResult } from './integrations/types';
 
 export type Restriction =
   | { kind: 'no_known_icing' }
@@ -33,12 +40,6 @@ export interface MELItem {
   item: string;
   category: MelCategory;
   restrictions: Restriction[];
-}
-
-export interface DeferredItem {
-  melId: string;
-  deferredAt: string;   // ISO date the item was opened
-  daysDeferred: number; // calculated against today
 }
 
 // ── Catalogue ────────────────────────────────────────────────────────────────
@@ -127,41 +128,18 @@ export const CATALOG: MELItem[] = [
 const BY_ID = new Map(CATALOG.map((m) => [m.id, m]));
 export const getMEL = (id: string): MELItem | undefined => BY_ID.get(id);
 
-// ── Per-tail deferrals ──────────────────────────────────────────────────────
-// Mock state — in prod this is a query against the maintenance system.
+// ── Per-tail deferrals (delegated to provider) ──────────────────────────────
 
-const TODAY = new Date('2026-04-29');
-const daysAgo = (n: number) => new Date(TODAY.getTime() - n * 86400 * 1000).toISOString().slice(0, 10);
+export async function getDeferredItems(tail: string): Promise<DeferredItem[]> {
+  return getMelProvider().getDeferredItems(tail);
+}
 
-interface RawDeferred { melId: string; deferredAt: string }
+export async function listAllDeferrals(): Promise<DeferredItem[]> {
+  return getMelProvider().listAllDeferrals();
+}
 
-const TAIL_DEFERRALS: Record<string, RawDeferred[]> = {
-  // 777-300ER with anti-ice issue + landing light
-  'G-XLEK': [
-    { melId: 'MEL-30-01', deferredAt: daysAgo(3) },
-    { melId: 'MEL-33-01', deferredAt: daysAgo(8) },
-  ],
-  // A330 with HF radio and CAT III deferred — risks transatlantic dispatch
-  'N801AA': [
-    { melId: 'MEL-23-01', deferredAt: daysAgo(2) },
-    { melId: 'MEL-22-01', deferredAt: daysAgo(5) },
-  ],
-  // A380 with APU INOP — heavy ramp impact
-  'D-AIMA': [
-    { melId: 'MEL-24-01', deferredAt: daysAgo(1) },
-  ],
-  // Other A380: clean
-  'A6-EUC': [],
-};
-
-export function getDeferredItems(tail: string): DeferredItem[] {
-  const raw = TAIL_DEFERRALS[tail.toUpperCase()] ?? [];
-  const today = TODAY.getTime();
-  return raw.map((r) => ({
-    melId: r.melId,
-    deferredAt: r.deferredAt,
-    daysDeferred: Math.floor((today - new Date(r.deferredAt).getTime()) / 86400 / 1000),
-  }));
+export async function melProviderHealth(): Promise<ProviderHealthResult> {
+  return getMelProvider().healthCheck();
 }
 
 // ── Assessor ────────────────────────────────────────────────────────────────

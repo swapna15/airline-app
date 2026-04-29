@@ -6,9 +6,9 @@ import {
   type Leg,
 } from '@/lib/fleet';
 import {
-  ROSTER, ASSIGNMENTS, assignmentsForFlight, flightsForCrew, typeMatches,
+  getRoster, getAssignments, assignmentsForFlight, flightsForCrew, typeMatches,
   MAX_FDP_MIN, MAX_FLIGHT_TIME_MIN, MIN_REST_MIN, REPORT_BUFFER_MIN, DEBRIEF_BUFFER_MIN,
-  type CrewMember,
+  type CrewMember, type CrewAssignment,
 } from '@/lib/crew';
 
 /**
@@ -118,11 +118,11 @@ function maintenanceConflicts(): Conflict[] {
   return conflicts;
 }
 
-function unstaffedConflicts(): Conflict[] {
+function unstaffedConflicts(roster: CrewMember[], assignments: CrewAssignment[]): Conflict[] {
   const conflicts: Conflict[] = [];
   for (const r of ROTATIONS) {
     for (const leg of r.legs) {
-      const assigned = assignmentsForFlight(leg.flight);
+      const assigned = assignmentsForFlight(roster, assignments, leg.flight);
       const hasCAP = assigned.some((c) => c.role === 'CAP');
       const hasFO  = assigned.some((c) => c.role === 'FO');
       if (!hasCAP) conflicts.push({ type: 'unstaffed', severity: 'block', detail: `${leg.flight} has no captain assigned`, tail: r.tail, flight: leg.flight });
@@ -134,9 +134,9 @@ function unstaffedConflicts(): Conflict[] {
 
 interface CrewWalkResult { crew: CrewSummary; conflicts: Conflict[] }
 
-function walkCrew(crew: CrewMember): CrewWalkResult {
+function walkCrew(crew: CrewMember, assignments: CrewAssignment[]): CrewWalkResult {
   const conflicts: Conflict[] = [];
-  const flightCodes = flightsForCrew(crew.id);
+  const flightCodes = flightsForCrew(assignments, crew.id);
 
   // Resolve each flight to its leg + tail's aircraft.
   type CrewLeg = { tail: string; aircraft: string; leg: Leg };
@@ -236,14 +236,16 @@ function walkCrew(crew: CrewMember): CrewWalkResult {
 }
 
 export async function GET() {
+  const [roster, assignments] = await Promise.all([getRoster(), getAssignments()]);
+
   const conflicts: Conflict[] = [
     ...maintenanceConflicts(),
-    ...unstaffedConflicts(),
+    ...unstaffedConflicts(roster, assignments),
   ];
 
   const crewSummaries: CrewSummary[] = [];
-  for (const member of ROSTER) {
-    const { crew, conflicts: c } = walkCrew(member);
+  for (const member of roster) {
+    const { crew, conflicts: c } = walkCrew(member, assignments);
     if (crew.flights.length > 0 || c.length > 0) {
       crewSummaries.push(crew);
       conflicts.push(...c);
@@ -265,8 +267,8 @@ export async function GET() {
       tails: ROTATIONS.length,
       legs: ROTATIONS.flatMap((r) => r.legs).length,
       maintenanceWindows: MAINTENANCE_WINDOWS.length,
-      crew: ROSTER.length,
-      assignments: ASSIGNMENTS.length,
+      crew: roster.length,
+      assignments: assignments.length,
     },
     summary: {
       total: conflicts.length,
@@ -283,13 +285,13 @@ export async function GET() {
         destination: l.destination,
         std: l.std,
         sta: l.sta,
-        crew: assignmentsForFlight(l.flight).map((c) => ({ id: c.id, name: c.name, role: c.role })),
+        crew: assignmentsForFlight(roster, assignments, l.flight).map((c) => ({ id: c.id, name: c.name, role: c.role })),
         conflicts: conflictsByFlight[l.flight] ?? 0,
       })),
       maintenance: MAINTENANCE_WINDOWS.filter((w) => w.tail === r.tail),
     })),
     crew: crewSummaries,
     conflicts,
-    source: 'mock fleet.ts + crew.ts; production needs CrewTrac/Sabre + AMOS maintenance feeds',
+    source: `crew:${roster[0]?.source ?? 'mock'} + fleet.ts mock maintenance windows`,
   });
 }

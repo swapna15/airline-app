@@ -46,7 +46,7 @@ export async function POST(req: NextRequest) {
   // can be looked up — return a clean "no deferrals known" response rather than 404.
   const rot = findRotationByFlight(body.flight);
   const tail = rot?.rotation.tail;
-  const deferred = tail ? getDeferredItems(tail) : [];
+  const deferred = tail ? await getDeferredItems(tail) : [];
 
   // Auto-derived route context. Planner can override any field via `overrides`.
   const distanceNM = greatCircleNM(origin, dest);
@@ -82,6 +82,12 @@ export async function POST(req: NextRequest) {
       category: d.mel.category,
       daysDeferred: d.daysDeferred,
       restrictions: d.mel.restrictions,
+      // Enterprise fields surfaced when the provider populates them.
+      description:      d.description,
+      dueAt:            d.dueAt,
+      partsOnOrder:     d.partsOnOrder,
+      placardInstalled: d.placardInstalled,
+      releasedBy:       d.releasedBy,
     })),
     conflicts:        assessment.conflicts,
     advisories:       assessment.advisories,
@@ -89,7 +95,7 @@ export async function POST(req: NextRequest) {
     flCeiling:        assessment.flCeiling,
     dispatchAllowed:  assessment.dispatchAllowed,
     source: tail
-      ? `mock mel.ts deferrals for ${tail} — production needs AMOS/TRAX integration`
+      ? `mel:${deferred[0]?.source ?? 'mock'} deferrals for ${tail}`
       : 'no rotation found for flight; assessment ran with empty deferral list',
   });
 }

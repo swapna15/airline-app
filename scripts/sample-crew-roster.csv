@@ -1,0 +1,11 @@
+id,name,role,base,type_ratings,prior_fdp_min,prior_flight_time_min,rest_min_since_last_duty,license_number,medical_expires_at,line_check_expires_at,status
+C001,"Allen, K.",CAP,JFK,777,0,0,840,ATP-US-1234567,2026-09-30,2026-12-15,active
+C002,"Bennett, R.",CAP,LHR,777,0,0,720,ATP-UK-2345678,2027-02-15,2026-11-20,active
+C003,"Carter, J.",CAP,JFK,A330,0,0,720,ATP-US-3456789,2026-08-10,2027-01-30,active
+C004,"Donovan, M.",CAP,FRA,A380,0,0,660,ATP-DE-4567890,2026-10-22,2026-09-15,active
+C005,"Engel, P.",CAP,DXB,A380,0,0,780,ATP-UAE-5678901,2026-11-30,2026-12-30,active
+C006,"Klein, A.",CAP,JFK,777,0,0,480,ATP-US-6789012,2027-01-15,2026-10-15,reserve
+F001,"Foster, J.",FO,JFK,777,0,0,840,CPL-US-7890123,2026-12-10,2026-12-15,active
+F002,"Garcia, T.",FO,LHR,777,0,0,720,CPL-UK-8901234,2027-01-22,2026-11-20,active
+F003,"Hewitt, S.",FO,JFK,A330,0,0,660,CPL-US-9012345,2026-09-15,2027-02-10,active
+F005,"Jung, K.",FO,FRA,A380,0,0,780,CPL-DE-0123456,2026-12-31,2027-03-15,active
