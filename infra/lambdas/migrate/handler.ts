@@ -3,12 +3,20 @@ import { join } from 'path';
 import { getPool } from '../shared/db';
 
 // SQL files are copied into the bundle directory by bundle.js
-const SCHEMA_SQL = readFileSync(join(__dirname, '001_schema.sql'), 'utf8');
-const SEED_SQL   = readFileSync(join(__dirname, '002_seed.sql'),   'utf8');
+// Schema migrations only — `003_refresh_flight_dates.sql` is an idempotent
+// data refresh and is NOT tracked here (running it once would freeze the demo
+// dates against the migration table; instead, run it ad-hoc when seeded flights
+// fall into the past).
+const SCHEMA_SQL       = readFileSync(join(__dirname, '001_schema.sql'),       'utf8');
+const SEED_SQL         = readFileSync(join(__dirname, '002_seed.sql'),         'utf8');
+const MULTI_TENANT_SQL = readFileSync(join(__dirname, '003_multi_tenant.sql'), 'utf8');
+const FLIGHT_PLANS_SQL = readFileSync(join(__dirname, '004_flight_plans.sql'), 'utf8');
 
 const MIGRATIONS = [
-  { name: '001_schema', sql: SCHEMA_SQL },
-  { name: '002_seed',   sql: SEED_SQL   },
+  { name: '001_schema',        sql: SCHEMA_SQL       },
+  { name: '002_seed',          sql: SEED_SQL         },
+  { name: '003_multi_tenant',  sql: MULTI_TENANT_SQL },
+  { name: '004_flight_plans',  sql: FLIGHT_PLANS_SQL },
 ];
 
 export const handler = async (): Promise<{ applied: string[]; skipped: string[] }> => {

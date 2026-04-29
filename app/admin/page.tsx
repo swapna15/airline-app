@@ -32,6 +32,7 @@ const ROLE_BADGE: Record<UserRole, string> = {
   checkin_agent: 'bg-green-100 text-green-700',
   gate_manager: 'bg-orange-100 text-orange-700',
   coordinator: 'bg-purple-100 text-purple-700',
+  flight_planner: 'bg-amber-100 text-amber-700',
   admin: 'bg-red-100 text-red-700',
 };
 

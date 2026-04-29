@@ -55,6 +55,7 @@ resource "aws_iam_role_policy" "apigw_invoke_lambda" {
         aws_lambda_function.checkin.arn,
         aws_lambda_function.gate.arn,
         aws_lambda_function.admin.arn,
+        aws_lambda_function.planning.arn,
       ]
     }]
   })
@@ -237,6 +238,43 @@ resource "aws_api_gateway_resource" "admin_flights" {
   path_part   = "flights"
 }
 
+# /planning
+resource "aws_api_gateway_resource" "planning" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_rest_api.main.root_resource_id
+  path_part   = "planning"
+}
+
+resource "aws_api_gateway_resource" "planning_flight_plans" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.planning.id
+  path_part   = "flight-plans"
+}
+
+resource "aws_api_gateway_resource" "planning_flight_plans_id" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.planning_flight_plans.id
+  path_part   = "{flightId}"
+}
+
+resource "aws_api_gateway_resource" "planning_flight_plans_id_reviews" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.planning_flight_plans_id.id
+  path_part   = "reviews"
+}
+
+resource "aws_api_gateway_resource" "planning_rejection_comments" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.planning.id
+  path_part   = "rejection-comments"
+}
+
+resource "aws_api_gateway_resource" "planning_eod_stats" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.planning.id
+  path_part   = "eod-stats"
+}
+
 # ── Method + Integration module ───────────────────────────────────────────────
 # Static map keys are required — for_each keys must be known at plan time,
 # so resource IDs (known after apply) cannot be used as keys.
@@ -279,6 +317,14 @@ locals {
     "PATCH-admin-users-id-role"    = { method = "PATCH",  resource_id = aws_api_gateway_resource.admin_users_id_role.id,          lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
     "DELETE-admin-users-id"        = { method = "DELETE", resource_id = aws_api_gateway_resource.admin_users_id.id,               lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
     "GET-admin-flights"            = { method = "GET",    resource_id = aws_api_gateway_resource.admin_flights.id,                lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
+
+    # Planning — flight_planner / admin only (enforced by handler)
+    "GET-planning-plan"            = { method = "GET",    resource_id = aws_api_gateway_resource.planning_flight_plans_id.id,         lambda_arn = aws_lambda_function.planning.invoke_arn, auth = true  },
+    "PUT-planning-plan"            = { method = "PUT",    resource_id = aws_api_gateway_resource.planning_flight_plans_id.id,         lambda_arn = aws_lambda_function.planning.invoke_arn, auth = true  },
+    "GET-planning-reviews"         = { method = "GET",    resource_id = aws_api_gateway_resource.planning_flight_plans_id_reviews.id, lambda_arn = aws_lambda_function.planning.invoke_arn, auth = true  },
+    "POST-planning-reviews"        = { method = "POST",   resource_id = aws_api_gateway_resource.planning_flight_plans_id_reviews.id, lambda_arn = aws_lambda_function.planning.invoke_arn, auth = true  },
+    "GET-planning-rejections"      = { method = "GET",    resource_id = aws_api_gateway_resource.planning_rejection_comments.id,      lambda_arn = aws_lambda_function.planning.invoke_arn, auth = true  },
+    "GET-planning-eod-stats"       = { method = "GET",    resource_id = aws_api_gateway_resource.planning_eod_stats.id,               lambda_arn = aws_lambda_function.planning.invoke_arn, auth = true  },
   }
 }
 
@@ -337,6 +383,7 @@ locals {
     checkin  = aws_lambda_function.checkin.function_name
     gate     = aws_lambda_function.gate.function_name
     admin    = aws_lambda_function.admin.function_name
+    planning = aws_lambda_function.planning.function_name
     authorizer = aws_lambda_function.authorizer.function_name
   }
 }

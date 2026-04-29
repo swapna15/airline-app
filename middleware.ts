@@ -5,6 +5,7 @@ import type { UserRole } from '@/types/roles';
 const ROUTE_ROLES: Record<string, UserRole[]> = {
   '/admin': ['admin'],
   '/coordinator': ['coordinator', 'admin'],
+  '/planner': ['flight_planner', 'admin'],
   '/gate': ['gate_manager', 'admin'],
   '/checkin': ['checkin_agent', 'admin'],
   '/my-bookings': ['passenger', 'admin'],
@@ -32,6 +33,7 @@ export const config = {
   matcher: [
     '/admin/:path*',
     '/coordinator/:path*',
+    '/planner/:path*',
     '/gate/:path*',
     '/checkin/:path*',
     '/my-bookings/:path*',

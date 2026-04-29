@@ -9,24 +9,27 @@ import { ROLE_LABELS } from '@/types/roles';
 import { useTenant } from '@/core/tenant/context';
 
 const NAV_LINKS: Record<UserRole, { label: string; href: string }[]> = {
-  passenger:     [{ label: 'Search Flights', href: '/' }, { label: 'My Trips', href: '/my-bookings' }],
-  checkin_agent: [{ label: 'Check-in Desk', href: '/checkin' }],
-  gate_manager:  [{ label: 'Gate Dashboard', href: '/gate' }],
-  coordinator:   [{ label: 'Flight Operations', href: '/coordinator' }],
-  admin:         [
+  passenger:      [{ label: 'Search Flights', href: '/' }, { label: 'My Trips', href: '/my-bookings' }],
+  checkin_agent:  [{ label: 'Check-in Desk', href: '/checkin' }],
+  gate_manager:   [{ label: 'Gate Dashboard', href: '/gate' }],
+  coordinator:    [{ label: 'Flight Operations', href: '/coordinator' }],
+  flight_planner: [{ label: 'Planner Dashboard', href: '/planner' }],
+  admin:          [
     { label: 'Admin', href: '/admin' },
     { label: 'Operations', href: '/coordinator' },
+    { label: 'Planner', href: '/planner' },
     { label: 'Gate', href: '/gate' },
     { label: 'Check-in', href: '/checkin' },
   ],
 };
 
 const ROLE_BADGE_COLORS: Record<UserRole, string> = {
-  passenger:     'bg-blue-50 text-blue-700',
-  checkin_agent: 'bg-green-50 text-green-700',
-  gate_manager:  'bg-orange-50 text-orange-700',
-  coordinator:   'bg-purple-50 text-purple-700',
-  admin:         'bg-red-50 text-red-700',
+  passenger:      'bg-blue-50 text-blue-700',
+  checkin_agent:  'bg-green-50 text-green-700',
+  gate_manager:   'bg-orange-50 text-orange-700',
+  coordinator:    'bg-purple-50 text-purple-700',
+  flight_planner: 'bg-amber-50 text-amber-700',
+  admin:          'bg-red-50 text-red-700',
 };
 
 /** Tenant switcher — shown when NEXT_PUBLIC_MULTI_TENANT_DEMO=true or in dev */

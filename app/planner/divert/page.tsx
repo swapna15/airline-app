@@ -1,0 +1,222 @@
+'use client';
+
+import { useState } from 'react';
+import { Loader2, AlertOctagon, MapPin, Wind, Fuel, Shield, Plane } from 'lucide-react';
+import { PlannerTabs } from '@/components/PlannerTabs';
+
+type Reason = 'medical' | 'mechanical' | 'weather' | 'fuel';
+
+const FLIGHTS = [
+  { flight: 'BA1000', origin: 'JFK', destination: 'LHR', aircraft: 'Boeing 777-300ER' },
+  { flight: 'AA2111', origin: 'JFK', destination: 'CDG', aircraft: 'Airbus A330-300' },
+  { flight: 'LH4410', origin: 'JFK', destination: 'FRA', aircraft: 'Airbus A380-800' },
+  { flight: 'EK5500', origin: 'JFK', destination: 'DXB', aircraft: 'Airbus A380-800' },
+];
+
+const REASONS: { value: Reason; label: string }[] = [
+  { value: 'medical',    label: 'Medical' },
+  { value: 'mechanical', label: 'Mechanical' },
+  { value: 'weather',    label: 'Weather' },
+  { value: 'fuel',       label: 'Fuel' },
+];
+
+interface Alternate {
+  airport: { iata: string; icao: string; name: string; runwayLengthFt: number; fireCat: number };
+  distanceFromOriginNM: number;
+  distanceFromDestNM: number;
+  fltCat?: 'VFR' | 'MVFR' | 'IFR' | 'LIFR';
+  metar?: string;
+  runwayAdequate: boolean;
+  customs: boolean;
+  fuel: boolean;
+  fireCatOk: boolean;
+  etopsAlternate: boolean;
+  score: number;
+  notes: string[];
+}
+
+interface DivertResponse {
+  flight: string;
+  reason: Reason;
+  requiredRunwayFt: number;
+  etopsRequired: boolean;
+  candidatePoolSize: number;
+  etopsAdequateCount: number;
+  ranked: Alternate[];
+  source: string;
+}
+
+const FLT_CAT_PILL: Record<string, string> = {
+  VFR:  'bg-green-100 text-green-700',
+  MVFR: 'bg-blue-100 text-blue-700',
+  IFR:  'bg-orange-100 text-orange-700',
+  LIFR: 'bg-red-100 text-red-700',
+};
+
+export default function DivertPage() {
+  const [selected, setSelected] = useState(FLIGHTS[0]);
+  const [reason, setReason] = useState<Reason>('medical');
+  const [result, setResult] = useState<DivertResponse | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const run = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch('/api/planner/divert', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...selected, reason }),
+      });
+      setResult(await res.json());
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="max-w-7xl mx-auto p-6">
+      <PlannerTabs />
+
+      <header className="mb-6">
+        <h1 className="text-2xl font-bold tracking-tight flex items-center gap-2">
+          <AlertOctagon className="text-amber-600" size={22} /> Diversion Advisor
+        </h1>
+        <p className="text-sm text-gray-500 mt-1">
+          Rank alternates by current WX, runway adequacy for the type, customs availability, and fuel uplift.
+        </p>
+      </header>
+
+      <section className="grid grid-cols-12 gap-4 mb-6">
+        <div className="col-span-5">
+          <label className="block text-xs font-medium text-gray-500 mb-1">Flight</label>
+          <select
+            className="w-full px-3 py-2 rounded-lg border border-gray-200 text-sm"
+            value={selected.flight}
+            onChange={(e) => setSelected(FLIGHTS.find((f) => f.flight === e.target.value)!)}
+          >
+            {FLIGHTS.map((f) => (
+              <option key={f.flight} value={f.flight}>
+                {f.flight} · {f.origin}→{f.destination} · {f.aircraft}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="col-span-4">
+          <label className="block text-xs font-medium text-gray-500 mb-1">Reason</label>
+          <div className="flex gap-1">
+            {REASONS.map((r) => (
+              <button
+                key={r.value}
+                onClick={() => setReason(r.value)}
+                className={`flex-1 px-2 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                  reason === r.value
+                    ? 'border-amber-500 bg-amber-50 text-amber-700'
+                    : 'border-gray-200 text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                {r.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="col-span-3 flex items-end">
+          <button
+            onClick={run}
+            disabled={loading}
+            className="w-full px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:bg-gray-200 transition-colors flex items-center justify-center gap-2"
+          >
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <Plane size={14} />}
+            {loading ? 'Scoring' : 'Rank Alternates'}
+          </button>
+        </div>
+      </section>
+
+      {result && (
+        <section>
+          <p className="text-xs text-gray-400 mb-3">
+            {result.ranked.length} alternates · req runway {result.requiredRunwayFt.toLocaleString()} ft
+            {result.etopsRequired && (
+              <span className="ml-2 px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">
+                ETOPS required · {result.etopsAdequateCount}/{result.candidatePoolSize} adequate in pool
+              </span>
+            )}
+            <span className="ml-2">· source: {result.source}</span>
+          </p>
+          <ol className="space-y-2">
+            {result.ranked.map((alt, i) => (
+              <li
+                key={alt.airport.iata}
+                className={`border rounded-xl p-4 ${
+                  i === 0 ? 'border-amber-300 bg-amber-50/30' : 'border-gray-200'
+                }`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="text-xs font-semibold text-gray-400 w-6">{String(i + 1).padStart(2, '0')}</span>
+                      <span className="font-semibold text-sm">
+                        {alt.airport.iata} <span className="text-gray-400 font-normal">/ {alt.airport.icao}</span>
+                      </span>
+                      <span className="text-xs text-gray-500">— {alt.airport.name}</span>
+                      {alt.fltCat && (
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${FLT_CAT_PILL[alt.fltCat]}`}>
+                          {alt.fltCat}
+                        </span>
+                      )}
+                      {alt.etopsAlternate && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-700">
+                          ETOPS
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="ml-8 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
+                      <span className="flex items-center gap-1">
+                        <MapPin size={11} /> {alt.distanceFromDestNM} nm from {selected.destination}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Plane size={11} /> {alt.airport.runwayLengthFt.toLocaleString()} ft
+                        {!alt.runwayAdequate && <span className="text-red-600">·short</span>}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Shield size={11} /> RFF {alt.airport.fireCat}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        <Fuel size={11} className={alt.fuel ? 'text-green-600' : 'text-red-500'} />
+                        {alt.fuel ? 'fuel' : 'no fuel'}
+                      </span>
+                      <span className="flex items-center gap-1">
+                        {alt.customs ? '🛂 customs' : '✕ no customs'}
+                      </span>
+                    </div>
+
+                    {alt.metar && (
+                      <p className="ml-8 mt-2 font-mono text-[11px] text-gray-500 truncate">
+                        <Wind size={10} className="inline mr-1" />{alt.metar}
+                      </p>
+                    )}
+
+                    {alt.notes.length > 0 && (
+                      <ul className="ml-8 mt-2 space-y-0.5">
+                        {alt.notes.map((n, idx) => (
+                          <li key={idx} className="text-[11px] text-amber-700">⚠ {n}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  <div className="text-right shrink-0">
+                    <div className="text-2xl font-bold text-gray-900">{alt.score}</div>
+                    <div className="text-[10px] text-gray-400 uppercase tracking-wide">score</div>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+    </div>
+  );
+}

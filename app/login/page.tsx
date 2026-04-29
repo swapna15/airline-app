@@ -120,6 +120,7 @@ export default function LoginPage() {
             {[
               { email: 'admin@airline.com', role: 'Airline Admin' },
               { email: 'coordinator@airline.com', role: 'Flight Coordinator' },
+              { email: 'planner@airline.com', role: 'Flight Planner' },
               { email: 'gate@airline.com', role: 'Gate Manager' },
               { email: 'checkin@airline.com', role: 'Check-in Agent' },
               { email: 'you@example.com', role: 'Passenger' },
