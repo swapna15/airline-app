@@ -404,7 +404,59 @@ resource "aws_api_gateway_stage" "main" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   stage_name    = var.environment
 
+  access_log_settings {
+    destination_arn = aws_cloudwatch_log_group.apigw_access.arn
+    # JSON-formatted access log — every request shows up with status, latency,
+    # path, method, authorizer principalId/role, and the raw error if a 4xx/5xx.
+    format = jsonencode({
+      requestTime         = "$context.requestTime"
+      requestId           = "$context.requestId"
+      httpMethod          = "$context.httpMethod"
+      path                = "$context.path"
+      status              = "$context.status"
+      responseLength      = "$context.responseLength"
+      integrationLatency  = "$context.integrationLatency"
+      integrationStatus   = "$context.integrationStatus"
+      integrationErrorMsg = "$context.integration.error"
+      authorizerError     = "$context.authorizer.error"
+      authorizerStatus    = "$context.authorizer.status"
+      principalId         = "$context.authorizer.principalId"
+      role                = "$context.authorizer.role"
+    })
+  }
+
   tags = { Name = "${local.name}-stage" }
+}
+
+# Per-stage access log group (separate from the Lambda log groups). Retains 14 days.
+resource "aws_cloudwatch_log_group" "apigw_access" {
+  name              = "/aws/apigateway/${local.name}-access"
+  retention_in_days = 14
+  tags              = { Name = "${local.name}-apigw-access" }
+}
+
+# API Gateway needs a separate IAM role at the *account* level to write to
+# CloudWatch. This is a one-per-account setting; declaring it here is
+# idempotent — Terraform will leave an existing setting in place.
+resource "aws_iam_role" "apigw_cloudwatch" {
+  name = "${local.name}-apigw-cloudwatch"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "apigateway.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "apigw_cloudwatch" {
+  role       = aws_iam_role.apigw_cloudwatch.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs"
+}
+
+resource "aws_api_gateway_account" "main" {
+  cloudwatch_role_arn = aws_iam_role.apigw_cloudwatch.arn
 }
 
 # ── Lambda permissions for API Gateway ───────────────────────────────────────
