@@ -19,6 +19,10 @@ import type { OwnFlight } from '@shared/schema/flight';
 import { getRoster, getAssignments, assignmentsForFlight } from '@/lib/crew';
 import { scoreCrewBatch, REJECT_FATIGUE_THRESHOLD, HIGH_FATIGUE_THRESHOLD } from '@/lib/crew-fatigue';
 import { loadOpsSpecs } from '@/lib/ops-specs';
+import {
+  isTwinEngine, equidistantPoint, findEtopsAlternates,
+  computeCriticalFuel, checkAlternateWeather,
+} from '@/lib/etops';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -182,15 +186,105 @@ export async function fuel(f: OwnFlight, authToken: string | null): Promise<Phas
   return { summary, data: { ...fe, policy: fp }, source: 'perf-table + tenant ops-specs' };
 }
 
-export function aircraft(f: OwnFlight): PhaseResult {
-  // Real path: lookup f.tail in fleet system; mocked here.
+export async function aircraft(f: OwnFlight, authToken: string | null): Promise<PhaseResult> {
+  // Tail lookup is still mocked — real path consults the fleet system.
   const tail = f.tail ?? 'G-XLEK';
+  const acft = aircraftLabel(f);
+
+  const o = lookupAirport(f.origin);
+  const d = lookupAirport(f.destination);
+
+  // ── ETOPS analysis ────────────────────────────────────────────────────────
+  // Twin-engine + over-water/long-haul routes incur ETOPS rules. We pull
+  // the operator's approval from OpsSpecs (B044), find adequate alternates
+  // within the approved time radius from the equidistant point, fetch
+  // current METAR for each, and compute the three critical-fuel scenarios.
+  const ops = await loadOpsSpecs(authToken);
+  const twin = isTwinEngine(acft);
+  const typeAuthorized = ops.etopsApproval.authorizedTypes.length === 0
+    || ops.etopsApproval.authorizedTypes.some(
+        (t) => acft.toUpperCase().replace(/\s+/g, '').includes(t.toUpperCase()),
+      );
+
+  // First-pass ETOPS trigger: twin + > 1500nm great-circle. Real planning
+  // also kicks in if any segment is > 60min from a suitable alternate;
+  // approximated here as distance.
+  let etopsBlock = '';
+  let etopsData: Record<string, unknown> = { applicable: false };
+
+  if (o && d && twin) {
+    const distanceNM = Math.round(
+      // reuse the perf greatCircleNM via fuelEstimate's distance output
+      fuelEstimate(o, d, acft).distanceNM,
+    );
+    if (distanceNM > 1500) {
+      const ep = equidistantPoint(o, d);
+      const requiredRunway = 7000;  // widebody-twin needs ≥ 7,000 ft
+      const candidates = findEtopsAlternates(ep, ops.etopsApproval, requiredRunway).slice(0, 5);
+      let weatherChecks: ReturnType<typeof checkAlternateWeather> = [];
+      if (candidates.length > 0) {
+        try {
+          const metars = await fetchMetars(candidates.map((c) => c.airport.icao));
+          weatherChecks = checkAlternateWeather(candidates, metars, ops.alternateMinima);
+        } catch {
+          weatherChecks = candidates.map((c) => ({
+            icao: c.airport.icao, iata: c.airport.iata,
+            meetsMinima: 'unknown' as const, reason: 'METAR fetch failed',
+          }));
+        }
+      }
+      const nearest = candidates[0]?.airport;
+      const fuel = nearest ? computeCriticalFuel(o, d, nearest, ep, acft) : null;
+
+      const meetingMin = weatherChecks.filter((w) => w.meetsMinima === 'yes').length;
+      const okForDispatch = !!nearest && !!fuel && meetingMin >= 1 && typeAuthorized;
+
+      etopsBlock =
+        `\nETOPS analysis:\n` +
+        `  · Equidistant point ${ep.lat.toFixed(2)}°, ${ep.lon.toFixed(2)}°; ` +
+        `${candidates.length} alternates within ${ops.etopsApproval.maxMinutes} min.\n` +
+        (fuel
+          ? `  · Critical fuel (driver: ${fuel.drivingScenario}): ${fuel.requiredKg.toLocaleString()} kg ` +
+            `vs standard ${fuel.standardKg.toLocaleString()} kg ` +
+            `(engine-out ${fuel.engineOutKg.toLocaleString()}, depress ${fuel.depressurizationKg.toLocaleString()}, both ${fuel.bothKg.toLocaleString()}).\n`
+          : `  · No ETOPS alternates within radius — dispatch BLOCKED.\n`) +
+        `  · Alternate weather (±1h proxy via METAR fltCat): ` +
+        `${meetingMin}/${weatherChecks.length} meet minima.\n` +
+        (typeAuthorized
+          ? ''
+          : `  · ⛔ ${acft} is NOT in OpsSpec B044 authorized types — dispatch BLOCKED.\n`) +
+        (okForDispatch ? `  · ✓ ETOPS dispatch eligible.` : `  · ⛔ ETOPS dispatch criteria NOT met.`);
+
+      etopsData = {
+        applicable: true,
+        twin,
+        typeAuthorized,
+        approvedMaxMin: ops.etopsApproval.maxMinutes,
+        equidistantPoint: ep,
+        alternates: candidates.map((c, i) => ({
+          ...c,
+          weather: weatherChecks[i],
+        })),
+        criticalFuel: fuel,
+        okForDispatch,
+      };
+    }
+  }
+
   return {
     summary:
-      `Recommended tail: ${tail} (${aircraftLabel(f)}). ETOPS 180 current, no MEL items affecting this route. ` +
-      `Last C-check 14d ago, next due in 89d. [mocked — fleet system not integrated]`,
-    data: { tail, etops: 180, melItems: [] },
-    source: 'mock://fleet-system',
+      `Recommended tail: ${tail} (${acft}). ` +
+      `Last C-check 14d ago, next due in 89d. [tail/MEL still mocked]` +
+      etopsBlock,
+    data: {
+      tail,
+      etops: ops.etopsApproval.maxMinutes,
+      melItems: [],
+      etopsAnalysis: etopsData,
+    },
+    source: etopsData.applicable
+      ? `mock://fleet-system + etops-calc + aviationweather:metar`
+      : `mock://fleet-system`,
   };
 }
 
@@ -271,7 +365,7 @@ export async function runPhase(id: PhaseId, f: OwnFlight, authToken: string | nu
     case 'brief':          return brief(f, authToken);
     case 'route':          return route(f);
     case 'fuel':           return fuel(f, authToken);
-    case 'aircraft':       return aircraft(f);
+    case 'aircraft':       return aircraft(f, authToken);
     case 'weight_balance': return weightBalance(f);
     case 'crew':           return crew(f);
     case 'slot_atc':       return slotAtc(f);
