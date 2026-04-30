@@ -12,16 +12,22 @@ resource "aws_api_gateway_rest_api" "main" {
 
 # ── Lambda Request Authorizer ─────────────────────────────────────────────────
 # REQUEST type (vs TOKEN) lets the authorizer read all headers, including
-# X-Tenant-ID. TTL is 0 so each (token, tenant) pair gets a fresh policy —
+# X-Tenant-ID. TTL is 0 so each request hits the authorizer Lambda fresh —
 # important because the same JWT used across tenants must not return a
 # cached policy that carries the wrong tenantSlug in its context.
+#
+# IMPORTANT: identity_source is the set of REQUIRED headers — if any are
+# missing or empty, API Gateway short-circuits to 401 WITHOUT invoking the
+# authorizer Lambda (CloudWatch shows status:401 + no Lambda log). Keep it
+# minimal: only Authorization is mandatory; X-Tenant-ID is read inside the
+# Lambda with 'aeromock' as the default.
 resource "aws_api_gateway_authorizer" "jwt" {
   name                             = "${local.name}-jwt-authorizer"
   rest_api_id                      = aws_api_gateway_rest_api.main.id
   authorizer_uri                   = aws_lambda_function.authorizer.invoke_arn
   authorizer_credentials           = aws_iam_role.apigw_invoke.arn
   type                             = "REQUEST"
-  identity_source                  = "method.request.header.Authorization, method.request.header.X-Tenant-ID"
+  identity_source                  = "method.request.header.Authorization"
   authorizer_result_ttl_in_seconds = 0
 }
 
