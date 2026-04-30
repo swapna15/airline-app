@@ -1,5 +1,5 @@
 import type { APIGatewayRequestAuthorizerEvent, APIGatewayAuthorizerResult } from 'aws-lambda';
-import jwt from 'jsonwebtoken';
+import { jwtVerify } from 'jose';
 
 interface NextAuthJWT {
   sub?: string;
@@ -24,10 +24,13 @@ export const handler = async (
     const secret = process.env.NEXTAUTH_SECRET!;
     let decoded: NextAuthJWT;
     try {
-      decoded = jwt.verify(token, secret, { algorithms: ['HS256'] }) as NextAuthJWT;
+      // jose — identical library to what the Vercel frontend signs with
+      // (lib/auth-jwt.ts), eliminates any library-specific edge cases that
+      // were causing jsonwebtoken to reject otherwise-valid HS256 tokens.
+      const key = new TextEncoder().encode(secret);
+      const { payload } = await jwtVerify(token, key, { algorithms: ['HS256'] });
+      decoded = payload as NextAuthJWT;
     } catch (verifyErr) {
-      // Log the exact error so it shows up in CloudWatch when JWT verification
-      // fails. Without this we just see a generic 401 in the API response.
       console.error('JWT verify failed:', {
         message: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),
         name:    verifyErr instanceof Error ? verifyErr.name    : undefined,
