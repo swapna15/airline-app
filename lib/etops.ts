@@ -21,7 +21,8 @@ import { listAirports } from '@/lib/icao';
 import { greatCircleNM, fuelEstimate } from '@/lib/perf';
 import type { MetarReport } from '@/lib/aviationweather';
 import type { EtopsApproval, AlternateMinima } from '@/lib/ops-specs';
-import { resolveAircraftType } from '@shared/semantic/aircraft';
+import { resolveAircraftType, aircraftEtopsPerf } from '@shared/semantic/aircraft';
+import type { EtopsPerformance } from '@shared/semantic/aircraft';
 
 /**
  * Twin-engine determination flows through the canonical aircraft ontology
@@ -99,6 +100,16 @@ export interface CriticalFuelScenarios {
   requiredKg: number;
   /** Which scenario drove the dispatch number — so the planner can argue with it. */
   drivingScenario: 'standard' | 'engineOut' | 'depressurization' | 'both';
+  /** Per-type ETOPS performance used for the calc. */
+  perfFactors: {
+    engineOutBurnFactor: number;
+    depressBurnFactor:   number;
+    bothBurnFactor:      number;
+  };
+  /** Where the perf factors came from: an ontology entry or the conservative fallback. */
+  perfSource: EtopsPerformance['source'] | 'fallback';
+  /** ICAO of the resolved type; undefined if the aircraft string didn't resolve. */
+  perfTypeIcao?: string;
 }
 
 export function computeCriticalFuel(
@@ -117,18 +128,18 @@ export function computeCriticalFuel(
   const epToAltNM = Math.round(greatCircleNM(ep as AirportRef, nearestAltFromEp));
   const cruiseBurnPerNm = standard.trip / standard.distanceNM;  // kg/nm at FL370
 
-  // Per-NM burn factors at each scenario's altitude.  Real planning replaces
-  // these with per-tail OEM tables (Boeing PEP / Airbus PEP).  First-pass:
-  //   engine-out at FL220+:  fuel flow ~0.80× of 2-eng cruise but TAS ~0.85×
-  //                          → per-nm burn ≈ 0.94× ... but altitude penalty
-  //                          adds ~15%, so ≈ 1.10× per-nm
-  //   depress (FL100 after emergency descent): fuel flow ~1.55× at 0.70× TAS
-  //                          → per-nm burn ≈ 2.20× ... but the descent itself
-  //                          burns < 5min of fuel, so amortized ≈ 1.40×
-  //   both (single-eng FL100): the worst — ≈ 1.70× per-nm
-  const ENGINE_OUT_BURN_PER_NM = cruiseBurnPerNm * 1.10;
-  const DEPRESS_BURN_PER_NM    = cruiseBurnPerNm * 1.40;
-  const BOTH_BURN_PER_NM       = cruiseBurnPerNm * 1.70;
+  // Per-type ETOPS factors — looked up from the aircraft ontology
+  // (shared/semantic/aircraft.ts:etopsPerf). Widebody twins differ
+  // significantly from narrowbody twins at FL100 depress, so a single
+  // global factor can't capture both. When the type doesn't resolve, falls
+  // back to conservative defaults (1.10 / 1.40 / 1.70).
+  //
+  // Real dispatch overrides this with operator-specific Boeing PEP / Airbus
+  // PEP per-tail tables driven by weight / altitude / ISA-deviation.
+  const { perf: etopsPerf, resolved: perfResolved, typeIcao } = aircraftEtopsPerf(aircraft);
+  const ENGINE_OUT_BURN_PER_NM = cruiseBurnPerNm * etopsPerf.engineOutBurnFactor;
+  const DEPRESS_BURN_PER_NM    = cruiseBurnPerNm * etopsPerf.depressBurnFactor;
+  const BOTH_BURN_PER_NM       = cruiseBurnPerNm * etopsPerf.bothBurnFactor;
 
   // Build a divert-leg scenario: from EP fly to the alt at the scenario's
   // per-nm burn, then hold at the alt (alternate fuel), then keep the
@@ -159,7 +170,18 @@ export function computeCriticalFuel(
   if (depressurizationKg > max) { max = depressurizationKg; drivingScenario = 'depressurization'; }
   if (bothKg > max)             { max = bothKg;             drivingScenario = 'both'; }
 
-  return { ...all, requiredKg: max, drivingScenario };
+  return {
+    ...all,
+    requiredKg: max,
+    drivingScenario,
+    perfFactors: {
+      engineOutBurnFactor: etopsPerf.engineOutBurnFactor,
+      depressBurnFactor:   etopsPerf.depressBurnFactor,
+      bothBurnFactor:      etopsPerf.bothBurnFactor,
+    },
+    perfSource: perfResolved ? etopsPerf.source : 'fallback',
+    perfTypeIcao: typeIcao,
+  };
 }
 
 export interface AlternateWeatherCheck {

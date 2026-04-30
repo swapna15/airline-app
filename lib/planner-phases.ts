@@ -267,7 +267,9 @@ export async function aircraft(f: OwnFlight, authToken: string | null): Promise<
         (fuel
           ? `  · Critical fuel (driver: ${fuel.drivingScenario}): ${fuel.requiredKg.toLocaleString()} kg ` +
             `vs standard ${fuel.standardKg.toLocaleString()} kg ` +
-            `(engine-out ${fuel.engineOutKg.toLocaleString()}, depress ${fuel.depressurizationKg.toLocaleString()}, both ${fuel.bothKg.toLocaleString()}).\n`
+            `(engine-out ${fuel.engineOutKg.toLocaleString()}, depress ${fuel.depressurizationKg.toLocaleString()}, both ${fuel.bothKg.toLocaleString()}).\n` +
+            `    perf: ${fuel.perfTypeIcao ?? 'unresolved'} ` +
+            `(${fuel.perfFactors.engineOutBurnFactor.toFixed(2)}× / ${fuel.perfFactors.depressBurnFactor.toFixed(2)}× / ${fuel.perfFactors.bothBurnFactor.toFixed(2)}× per-NM, source: ${fuel.perfSource})\n`
           : `  · No ETOPS alternates within radius — dispatch BLOCKED.\n`) +
         `  · Alternate weather (±1h proxy via METAR fltCat): ` +
         `${meetingMin}/${weatherChecks.length} meet minima.\n` +

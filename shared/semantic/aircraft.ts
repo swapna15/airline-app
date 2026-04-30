@@ -21,6 +21,32 @@
  *     families with one entry instead of every variant.
  */
 
+/**
+ * Per-type ETOPS critical-fuel performance. These factors scale the normal
+ * 2-engine cruise per-NM burn to the per-NM burn at the given failure
+ * scenario's altitude and configuration.
+ *
+ * Real dispatch consumes the operator's Boeing PEP / Airbus PEP per-tail
+ * tables, which take weight, altitude, ISA-deviation, and configuration as
+ * inputs. The factors here are first-pass type-level approximations sourced
+ * from manufacturer training material and IVAO/SmartCockpit references — when
+ * a tenant plugs in a real PEP integration, these get overridden per tail.
+ */
+export interface EtopsPerformance {
+  /** Per-NM fuel burn ratio at engine-out cruise (typically FL220) vs 2-engine cruise. */
+  engineOutBurnFactor: number;
+  /** Per-NM fuel burn ratio after rapid depress, descent to FL100, both engines running. */
+  depressBurnFactor: number;
+  /** Per-NM fuel burn ratio at FL100 single-engine — the worst case. */
+  bothBurnFactor: number;
+  /** Max altitude after engine failure (FL units). FL220 typical for widebody, FL170 narrowbody. */
+  engineOutCeilingFL: number;
+  /** Cargo fire suppression time in minutes — bounds the EP-to-alt time per FAR 121 App. P. */
+  cargoFireSuppressionMin?: number;
+  /** Provenance — 'first-pass' = type-level estimate, 'PEP' = real Boeing/Airbus table. */
+  source: 'first-pass' | 'PEP' | 'manufacturer';
+}
+
 export interface AircraftType {
   /** ICAO type designator — primary key (e.g., 'B77W'). */
   icao: string;
@@ -47,16 +73,25 @@ export interface AircraftType {
   cruiseBurnKgPerHr: number;
   cruiseMach: number;
   mtowKg: number;
+
+  /** Per-type ETOPS critical-fuel performance. Present for ETOPS-capable twins; absent otherwise. */
+  etopsPerf?: EtopsPerformance;
 }
 
 export const AIRCRAFT_TYPES: AircraftType[] = [
   // ── 777 family ───────────────────────────────────────────────────────────
+  // Widebody twins: engine-out at FL220, cargo fire suppression 195 min.
+  // Numbers from Boeing FCTM / IVAO ETOPS guidance.
   {
     icao: 'B77W', iata: '77W', family: '777', manufacturer: 'Boeing',
     marketingName: 'Boeing 777-300ER',
     aliases: ['Boeing 777-300ER', 'B777-300ER', '777-300ER', 'Boeing 777', '777'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 7500, cruiseMach: 0.84, mtowKg: 351_500,
+    etopsPerf: {
+      engineOutBurnFactor: 1.05, depressBurnFactor: 2.55, bothBurnFactor: 1.65,
+      engineOutCeilingFL: 220, cargoFireSuppressionMin: 195, source: 'first-pass',
+    },
   },
   {
     icao: 'B772', iata: '772', family: '777', manufacturer: 'Boeing',
@@ -64,6 +99,10 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     aliases: ['Boeing 777-200ER', '777-200ER', 'Boeing 777-200', '777-200'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 7300, cruiseMach: 0.84, mtowKg: 297_550,
+    etopsPerf: {
+      engineOutBurnFactor: 1.05, depressBurnFactor: 2.55, bothBurnFactor: 1.65,
+      engineOutCeilingFL: 220, cargoFireSuppressionMin: 195, source: 'first-pass',
+    },
   },
   {
     icao: 'B77L', iata: '77L', family: '777', manufacturer: 'Boeing',
@@ -71,6 +110,10 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     aliases: ['Boeing 777-200LR', '777-200LR'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 7600, cruiseMach: 0.84, mtowKg: 347_500,
+    etopsPerf: {
+      engineOutBurnFactor: 1.05, depressBurnFactor: 2.55, bothBurnFactor: 1.65,
+      engineOutCeilingFL: 220, cargoFireSuppressionMin: 330, source: 'first-pass',
+    },
   },
   {
     icao: 'B779', iata: '779', family: '777', manufacturer: 'Boeing',
@@ -78,14 +121,24 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     aliases: ['Boeing 777-9', 'Boeing 777X', '777X', '777-9'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 8200, cruiseMach: 0.84, mtowKg: 351_500,
+    etopsPerf: {
+      engineOutBurnFactor: 1.05, depressBurnFactor: 2.55, bothBurnFactor: 1.65,
+      engineOutCeilingFL: 220, cargoFireSuppressionMin: 330, source: 'first-pass',
+    },
   },
   // ── 787 family ───────────────────────────────────────────────────────────
+  // 787 has electric (not bleed) ECS — slightly more efficient at FL100 depress.
+  // Cargo fire 330 min (one of the longest in service).
   {
     icao: 'B788', iata: '788', family: '787', manufacturer: 'Boeing',
     marketingName: 'Boeing 787-8',
     aliases: ['Boeing 787-8', '787-8'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 5300, cruiseMach: 0.85, mtowKg: 227_930,
+    etopsPerf: {
+      engineOutBurnFactor: 1.00, depressBurnFactor: 2.45, bothBurnFactor: 1.60,
+      engineOutCeilingFL: 240, cargoFireSuppressionMin: 330, source: 'first-pass',
+    },
   },
   {
     icao: 'B789', iata: '789', family: '787', manufacturer: 'Boeing',
@@ -93,6 +146,10 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     aliases: ['Boeing 787-9', '787-9', 'Boeing 787', '787'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 5400, cruiseMach: 0.85, mtowKg: 254_000,
+    etopsPerf: {
+      engineOutBurnFactor: 1.00, depressBurnFactor: 2.45, bothBurnFactor: 1.60,
+      engineOutCeilingFL: 240, cargoFireSuppressionMin: 330, source: 'first-pass',
+    },
   },
   {
     icao: 'B78X', iata: '78X', family: '787', manufacturer: 'Boeing',
@@ -100,6 +157,10 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     aliases: ['Boeing 787-10', '787-10'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 5600, cruiseMach: 0.85, mtowKg: 254_000,
+    etopsPerf: {
+      engineOutBurnFactor: 1.00, depressBurnFactor: 2.45, bothBurnFactor: 1.60,
+      engineOutCeilingFL: 240, cargoFireSuppressionMin: 330, source: 'first-pass',
+    },
   },
   // ── 747 family ───────────────────────────────────────────────────────────
   {
@@ -117,12 +178,18 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     cruiseBurnKgPerHr: 11_500, cruiseMach: 0.86, mtowKg: 447_700,
   },
   // ── 737 family ───────────────────────────────────────────────────────────
+  // Narrowbody twins: lower engine-out ceiling (FL170-200), cargo fire 60 min.
+  // ETOPS for 737NG is 180 min (ETOPS-180); the same factors apply.
   {
     icao: 'B738', iata: '738', family: '737', manufacturer: 'Boeing',
     marketingName: 'Boeing 737-800',
     aliases: ['Boeing 737-800', '737-800', '737NG', 'Boeing 737NG', 'Boeing 737', '737'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 2500, cruiseMach: 0.78, mtowKg: 79_000,
+    etopsPerf: {
+      engineOutBurnFactor: 1.20, depressBurnFactor: 2.30, bothBurnFactor: 1.75,
+      engineOutCeilingFL: 200, cargoFireSuppressionMin: 60, source: 'first-pass',
+    },
   },
   {
     icao: 'B739', iata: '739', family: '737', manufacturer: 'Boeing',
@@ -130,6 +197,10 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     aliases: ['Boeing 737-900', '737-900'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 2600, cruiseMach: 0.78, mtowKg: 79_000,
+    etopsPerf: {
+      engineOutBurnFactor: 1.20, depressBurnFactor: 2.30, bothBurnFactor: 1.75,
+      engineOutCeilingFL: 200, cargoFireSuppressionMin: 60, source: 'first-pass',
+    },
   },
   {
     icao: 'B38M', iata: '7M8', family: '737', manufacturer: 'Boeing',
@@ -137,14 +208,23 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     aliases: ['Boeing 737 MAX 8', '737 MAX 8', '737-8', 'Boeing 737-8'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 2300, cruiseMach: 0.79, mtowKg: 82_200,
+    etopsPerf: {
+      engineOutBurnFactor: 1.18, depressBurnFactor: 2.30, bothBurnFactor: 1.72,
+      engineOutCeilingFL: 210, cargoFireSuppressionMin: 60, source: 'first-pass',
+    },
   },
   // ── A330 family ──────────────────────────────────────────────────────────
+  // ETOPS-240 (A330) and ETOPS-370 (A350). Cargo fire 240-330 min.
   {
     icao: 'A332', iata: '332', family: 'A330', manufacturer: 'Airbus',
     marketingName: 'Airbus A330-200',
     aliases: ['Airbus A330-200', 'A330-200'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 5500, cruiseMach: 0.82, mtowKg: 230_000,
+    etopsPerf: {
+      engineOutBurnFactor: 1.08, depressBurnFactor: 2.50, bothBurnFactor: 1.68,
+      engineOutCeilingFL: 230, cargoFireSuppressionMin: 240, source: 'first-pass',
+    },
   },
   {
     icao: 'A333', iata: '333', family: 'A330', manufacturer: 'Airbus',
@@ -152,6 +232,10 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     aliases: ['Airbus A330-300', 'A330-300', 'Airbus A330', 'A330'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 5800, cruiseMach: 0.82, mtowKg: 233_000,
+    etopsPerf: {
+      engineOutBurnFactor: 1.08, depressBurnFactor: 2.50, bothBurnFactor: 1.68,
+      engineOutCeilingFL: 230, cargoFireSuppressionMin: 240, source: 'first-pass',
+    },
   },
   {
     icao: 'A339', iata: '339', family: 'A330', manufacturer: 'Airbus',
@@ -159,14 +243,23 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     aliases: ['Airbus A330-900', 'A330-900', 'A330neo', 'Airbus A330neo'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 5400, cruiseMach: 0.82, mtowKg: 251_000,
+    etopsPerf: {
+      engineOutBurnFactor: 1.05, depressBurnFactor: 2.45, bothBurnFactor: 1.65,
+      engineOutCeilingFL: 240, cargoFireSuppressionMin: 240, source: 'first-pass',
+    },
   },
   // ── A350 family ──────────────────────────────────────────────────────────
+  // A350 has ETOPS-370 capability — the longest in service. Higher cruise alt.
   {
     icao: 'A359', iata: '359', family: 'A350', manufacturer: 'Airbus',
     marketingName: 'Airbus A350-900',
     aliases: ['Airbus A350-900', 'A350-900', 'Airbus A350', 'A350'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 5800, cruiseMach: 0.85, mtowKg: 280_000,
+    etopsPerf: {
+      engineOutBurnFactor: 1.02, depressBurnFactor: 2.40, bothBurnFactor: 1.62,
+      engineOutCeilingFL: 250, cargoFireSuppressionMin: 330, source: 'first-pass',
+    },
   },
   {
     icao: 'A35K', iata: '351', family: 'A350', manufacturer: 'Airbus',
@@ -174,6 +267,10 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     aliases: ['Airbus A350-1000', 'A350-1000'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 6300, cruiseMach: 0.85, mtowKg: 319_000,
+    etopsPerf: {
+      engineOutBurnFactor: 1.02, depressBurnFactor: 2.40, bothBurnFactor: 1.62,
+      engineOutCeilingFL: 250, cargoFireSuppressionMin: 330, source: 'first-pass',
+    },
   },
   // ── A380 ─────────────────────────────────────────────────────────────────
   {
@@ -192,12 +289,17 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     cruiseBurnKgPerHr: 6800, cruiseMach: 0.82, mtowKg: 275_000,
   },
   // ── A320 family ──────────────────────────────────────────────────────────
+  // ETOPS-180 typical for A320/A321. Narrowbody figures similar to 737.
   {
     icao: 'A319', iata: '319', family: 'A320', manufacturer: 'Airbus',
     marketingName: 'Airbus A319',
     aliases: ['Airbus A319', 'A319'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 2300, cruiseMach: 0.78, mtowKg: 75_500,
+    etopsPerf: {
+      engineOutBurnFactor: 1.18, depressBurnFactor: 2.28, bothBurnFactor: 1.72,
+      engineOutCeilingFL: 200, cargoFireSuppressionMin: 60, source: 'first-pass',
+    },
   },
   {
     icao: 'A320', iata: '320', family: 'A320', manufacturer: 'Airbus',
@@ -205,6 +307,10 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     aliases: ['Airbus A320', 'A320'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 2500, cruiseMach: 0.78, mtowKg: 78_000,
+    etopsPerf: {
+      engineOutBurnFactor: 1.18, depressBurnFactor: 2.28, bothBurnFactor: 1.72,
+      engineOutCeilingFL: 200, cargoFireSuppressionMin: 60, source: 'first-pass',
+    },
   },
   {
     icao: 'A321', iata: '321', family: 'A320', manufacturer: 'Airbus',
@@ -212,6 +318,10 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     aliases: ['Airbus A321', 'A321'],
     engineCount: 2, defaultEtopsCapable: true,
     cruiseBurnKgPerHr: 2700, cruiseMach: 0.78, mtowKg: 93_500,
+    etopsPerf: {
+      engineOutBurnFactor: 1.18, depressBurnFactor: 2.30, bothBurnFactor: 1.74,
+      engineOutCeilingFL: 195, cargoFireSuppressionMin: 60, source: 'first-pass',
+    },
   },
   // ── Tri-jets / regionals ─────────────────────────────────────────────────
   {
@@ -347,4 +457,32 @@ export function aircraftPerformance(input: string | undefined | null): {
     };
   }
   return DEFAULT_AIRCRAFT_PERFORMANCE;
+}
+
+/**
+ * Conservative ETOPS-perf defaults for types lacking an etopsPerf entry —
+ * used when an unrecognized twin or non-ETOPS type is queried so the
+ * critical-fuel calc still produces a number rather than NaN.
+ */
+export const DEFAULT_ETOPS_PERFORMANCE: EtopsPerformance = {
+  engineOutBurnFactor: 1.10,
+  depressBurnFactor:   1.40,
+  bothBurnFactor:      1.70,
+  engineOutCeilingFL:  220,
+  source: 'first-pass',
+};
+
+/**
+ * Returns the resolved type's per-NM ETOPS factors, or the conservative
+ * defaults. Includes a `resolved` flag so callers (like the planner UI) can
+ * surface whether they're operating on real per-type numbers or the fallback.
+ */
+export function aircraftEtopsPerf(input: string | undefined | null): {
+  perf: EtopsPerformance;
+  resolved: boolean;
+  typeIcao?: string;
+} {
+  const t = resolveAircraftType(input);
+  if (t?.etopsPerf) return { perf: t.etopsPerf, resolved: true, typeIcao: t.icao };
+  return { perf: DEFAULT_ETOPS_PERFORMANCE, resolved: false, typeIcao: t?.icao };
 }
