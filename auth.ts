@@ -1,7 +1,9 @@
 import NextAuth from 'next-auth';
 import type { User } from 'next-auth';
+import type { JWT } from 'next-auth/jwt';
 import GoogleProvider from 'next-auth/providers/google';
 import CredentialsProvider from 'next-auth/providers/credentials';
+import { SignJWT, jwtVerify } from 'jose';
 import { roleFromEmail } from '@/types/roles';
 import type { UserRole } from '@/types/roles';
 
@@ -54,6 +56,31 @@ export const authOptions = {
   },
   session: { strategy: 'jwt' as const },
   secret: process.env.NEXTAUTH_SECRET,
+  // Override the default A256GCM JWE encoding with HS256 signing so the API
+  // Gateway authorizer Lambda — which uses jsonwebtoken.verify(token, secret)
+  // — can validate the same cookie. Without this, every authed bridge call
+  // 401s because jsonwebtoken cannot read encrypted JWE tokens.
+  jwt: {
+    async encode({ token, secret, maxAge }: { token?: JWT; secret: string | Buffer; maxAge?: number }) {
+      const key = new TextEncoder().encode(typeof secret === 'string' ? secret : secret.toString());
+      const exp = Math.floor(Date.now() / 1000) + (maxAge ?? 30 * 24 * 60 * 60);
+      return await new SignJWT({ ...(token ?? {}) })
+        .setProtectedHeader({ alg: 'HS256' })
+        .setIssuedAt()
+        .setExpirationTime(exp)
+        .sign(key);
+    },
+    async decode({ token, secret }: { token?: string; secret: string | Buffer }) {
+      if (!token) return null;
+      try {
+        const key = new TextEncoder().encode(typeof secret === 'string' ? secret : secret.toString());
+        const { payload } = await jwtVerify(token, key, { algorithms: ['HS256'] });
+        return payload as JWT;
+      } catch {
+        return null;
+      }
+    },
+  },
   callbacks: {
     async jwt({ token, user }: { token: any; user: any }) {
       if (user?.role) token.role = user.role;
