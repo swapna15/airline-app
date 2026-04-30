@@ -56,7 +56,7 @@ export const AIRCRAFT_TYPES: AircraftType[] = [
     marketingName: 'Boeing 777-300ER',
     aliases: ['Boeing 777-300ER', 'B777-300ER', '777-300ER', 'Boeing 777', '777'],
     engineCount: 2, defaultEtopsCapable: true,
-    cruiseBurnKgPerHr: 8500, cruiseMach: 0.84, mtowKg: 351_500,
+    cruiseBurnKgPerHr: 7500, cruiseMach: 0.84, mtowKg: 351_500,
   },
   {
     icao: 'B772', iata: '772', family: '777', manufacturer: 'Boeing',
@@ -321,4 +321,30 @@ export function isTwinEngine(aircraft: string | undefined | null): boolean {
 
 export function aircraftLabel(t: AircraftType | undefined | null, fallback: string): string {
   return t?.marketingName ?? fallback;
+}
+
+/**
+ * Last-resort defaults for unrecognized aircraft strings. Used by the
+ * fuel-estimate path so a typo in the marketing string doesn't break
+ * dispatch — better to plan with conservative numbers than to fall over.
+ */
+export const DEFAULT_AIRCRAFT_PERFORMANCE = {
+  cruiseBurnKgPerHr: 6500,
+  cruiseMach: 0.82,
+  mtowKg: 250_000,
+} as const;
+
+/** Returns the resolved record's perf, or conservative defaults. */
+export function aircraftPerformance(input: string | undefined | null): {
+  cruiseBurnKgPerHr: number; cruiseMach: number; mtowKg: number;
+} {
+  const t = resolveAircraftType(input);
+  if (t) {
+    return {
+      cruiseBurnKgPerHr: t.cruiseBurnKgPerHr,
+      cruiseMach: t.cruiseMach,
+      mtowKg: t.mtowKg,
+    };
+  }
+  return DEFAULT_AIRCRAFT_PERFORMANCE;
 }

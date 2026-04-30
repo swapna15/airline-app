@@ -4,8 +4,14 @@
  * These calcs give *real numbers from real inputs* — distance from coordinates,
  * fuel from a per-aircraft burn-rate table — without pretending to model winds,
  * step climbs, or contingency reserves accurately.
+ *
+ * Per-type cruise burn / Mach / MTOW now comes from the canonical aircraft
+ * ontology at /shared/semantic/aircraft.ts. Adding a new type or fixing a
+ * burn-rate is a one-line edit there; every consumer (this file, the ETOPS
+ * engine, the Lambda) picks it up automatically.
  */
 import { listAirports, type AirportRef } from './icao';
+import { aircraftPerformance } from '@shared/semantic/aircraft';
 
 const NM_PER_KM = 0.539957;
 
@@ -23,32 +29,9 @@ export function greatCircleNM(a: AirportRef, b: AirportRef): number {
   return km * NM_PER_KM;
 }
 
-/**
- * Approximate cruise fuel burn (kg/h) and Mach for common widebodies.
- * Sourced from manufacturer published specs — accurate enough for a
- * planning estimate, not a dispatch release.
- */
-const PERF_TABLE: Record<string, { burnKgPerHr: number; mach: number; mtowKg: number }> = {
-  '777-300ER': { burnKgPerHr: 7500, mach: 0.84, mtowKg: 351_500 },
-  '777':       { burnKgPerHr: 7500, mach: 0.84, mtowKg: 351_500 },
-  'A330-300':  { burnKgPerHr: 5800, mach: 0.82, mtowKg: 233_000 },
-  'A330':      { burnKgPerHr: 5800, mach: 0.82, mtowKg: 233_000 },
-  'A380-800':  { burnKgPerHr: 11_000, mach: 0.85, mtowKg: 575_000 },
-  'A380':      { burnKgPerHr: 11_000, mach: 0.85, mtowKg: 575_000 },
-  '787-9':     { burnKgPerHr: 5400, mach: 0.85, mtowKg: 254_000 },
-  '787':       { burnKgPerHr: 5400, mach: 0.85, mtowKg: 254_000 },
-  'A350-900':  { burnKgPerHr: 5800, mach: 0.85, mtowKg: 280_000 },
-  'A350':      { burnKgPerHr: 5800, mach: 0.85, mtowKg: 280_000 },
-};
-
-const DEFAULT_PERF = { burnKgPerHr: 6500, mach: 0.82, mtowKg: 250_000 };
-
-function matchPerf(aircraft: string) {
-  const upper = aircraft.toUpperCase().replace(/\s+/g, '');
-  for (const key of Object.keys(PERF_TABLE)) {
-    if (upper.includes(key.toUpperCase())) return PERF_TABLE[key];
-  }
-  return DEFAULT_PERF;
+function matchPerf(aircraft: string): { burnKgPerHr: number; mach: number; mtowKg: number } {
+  const p = aircraftPerformance(aircraft);
+  return { burnKgPerHr: p.cruiseBurnKgPerHr, mach: p.cruiseMach, mtowKg: p.mtowKg };
 }
 
 const TAS_KT_PER_MACH = 573; // approx at FL350, ISA
