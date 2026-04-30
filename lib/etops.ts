@@ -67,20 +67,48 @@ export interface EtopsAlternateCandidate {
   minutesFromEp: number;
 }
 
+/**
+ * Reserve below the cargo fire suppression budget for descent + approach + land.
+ * 15 min is a common operator-level margin (Boeing FCTM, Airbus FCOM).
+ */
+const CARGO_FIRE_DESCENT_MARGIN_MIN = 15;
+
 const SINGLE_ENGINE_TAS_KT = 460;
+
+/**
+ * The most restrictive of the two ETOPS time bounds:
+ *   - operator's OpsSpec B044 approved time (60 / 120 / 180 / 240 / 330 / 370)
+ *   - airframe's cargo fire suppression — descent margin (FAR 121 App. P §1(d))
+ *
+ * For a 777 (195 min suppression) under ETOPS-180 the OpsSpec wins.
+ * For a 737 (60 min suppression) the cargo fire budget is the binding constraint
+ * — even an ETOPS-180-approved narrowbody can only divert ≈ 45 min worth from EP.
+ */
+export function effectiveEtopsBound(
+  approval: EtopsApproval,
+  cargoFireSuppressionMin?: number,
+): { maxMinutes: number; binding: 'opsspec' | 'cargo-fire' } {
+  if (!cargoFireSuppressionMin) return { maxMinutes: approval.maxMinutes, binding: 'opsspec' };
+  const cargoBound = cargoFireSuppressionMin - CARGO_FIRE_DESCENT_MARGIN_MIN;
+  return cargoBound < approval.maxMinutes
+    ? { maxMinutes: cargoBound, binding: 'cargo-fire' }
+    : { maxMinutes: approval.maxMinutes, binding: 'opsspec' };
+}
 
 export function findEtopsAlternates(
   ep: { lat: number; lon: number },
   approval: EtopsApproval,
   requiredRunwayFt: number,
+  cargoFireSuppressionMin?: number,
 ): EtopsAlternateCandidate[] {
+  const { maxMinutes } = effectiveEtopsBound(approval, cargoFireSuppressionMin);
   const out: EtopsAlternateCandidate[] = [];
   for (const a of listAirports()) {
     if (!a.etopsAlternate) continue;             // pre-flagged in airports.json
     if (a.runwayLengthFt < requiredRunwayFt) continue;
     const distanceFromEpNM = greatCircleNM(ep as AirportRef, a);
     const minutesFromEp = Math.round((distanceFromEpNM / SINGLE_ENGINE_TAS_KT) * 60);
-    if (minutesFromEp <= approval.maxMinutes) {
+    if (minutesFromEp <= maxMinutes) {
       out.push({ airport: a, distanceFromEpNM: Math.round(distanceFromEpNM), minutesFromEp });
     }
   }

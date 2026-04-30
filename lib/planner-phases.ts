@@ -20,7 +20,7 @@ import { getRoster, getAssignments, assignmentsForFlight } from '@/lib/crew';
 import { scoreCrewBatch, REJECT_FATIGUE_THRESHOLD, HIGH_FATIGUE_THRESHOLD } from '@/lib/crew-fatigue';
 import { loadOpsSpecs } from '@/lib/ops-specs';
 import {
-  equidistantPoint, findEtopsAlternates,
+  equidistantPoint, findEtopsAlternates, effectiveEtopsBound,
   computeCriticalFuel, checkAlternateWeather,
 } from '@/lib/etops';
 import { resolveAircraftType, isTypeAuthorized } from '@shared/semantic/aircraft';
@@ -241,7 +241,15 @@ export async function aircraft(f: OwnFlight, authToken: string | null): Promise<
     if (distanceNM > 1500) {
       const ep = equidistantPoint(o, d);
       const requiredRunway = 7000;  // widebody-twin needs ≥ 7,000 ft
-      const candidates = findEtopsAlternates(ep, ops.etopsApproval, requiredRunway).slice(0, 5);
+
+      // Cargo fire suppression caps the EP-to-alt time per FAR 121 App. P
+      // §1(d). Whichever bound is more restrictive — operator's OpsSpec B044
+      // or airframe suppression — wins.
+      const cargoFireMin = resolvedType?.etopsPerf?.cargoFireSuppressionMin;
+      const bound = effectiveEtopsBound(ops.etopsApproval, cargoFireMin);
+      const candidates = findEtopsAlternates(
+        ep, ops.etopsApproval, requiredRunway, cargoFireMin,
+      ).slice(0, 5);
       let weatherChecks: ReturnType<typeof checkAlternateWeather> = [];
       if (candidates.length > 0) {
         try {
@@ -260,10 +268,16 @@ export async function aircraft(f: OwnFlight, authToken: string | null): Promise<
       const meetingMin = weatherChecks.filter((w) => w.meetsMinima === 'yes').length;
       const okForDispatch = !!nearest && !!fuel && meetingMin >= 1 && typeAuthorized;
 
+      const boundLabel =
+        bound.binding === 'cargo-fire'
+          ? `${bound.maxMinutes} min (cargo fire ${cargoFireMin}–${15}min descent margin; OpsSpec allows ${ops.etopsApproval.maxMinutes})`
+          : `${bound.maxMinutes} min (OpsSpec B044)` +
+            (cargoFireMin ? `, cargo fire ${cargoFireMin} min not binding` : '');
+
       etopsBlock =
         `\nETOPS analysis:\n` +
         `  · Equidistant point ${ep.lat.toFixed(2)}°, ${ep.lon.toFixed(2)}°; ` +
-        `${candidates.length} alternates within ${ops.etopsApproval.maxMinutes} min.\n` +
+        `${candidates.length} alternates within ${boundLabel}.\n` +
         (fuel
           ? `  · Critical fuel (driver: ${fuel.drivingScenario}): ${fuel.requiredKg.toLocaleString()} kg ` +
             `vs standard ${fuel.standardKg.toLocaleString()} kg ` +
@@ -283,6 +297,9 @@ export async function aircraft(f: OwnFlight, authToken: string | null): Promise<
         twin,
         typeAuthorized,
         approvedMaxMin: ops.etopsApproval.maxMinutes,
+        cargoFireSuppressionMin: cargoFireMin,
+        effectiveMaxMin: bound.maxMinutes,
+        bindingConstraint: bound.binding,
         equidistantPoint: ep,
         alternates: candidates.map((c, i) => ({
           ...c,
