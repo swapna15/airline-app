@@ -21,31 +21,15 @@ import { listAirports } from '@/lib/icao';
 import { greatCircleNM, fuelEstimate } from '@/lib/perf';
 import type { MetarReport } from '@/lib/aviationweather';
 import type { EtopsApproval, AlternateMinima } from '@/lib/ops-specs';
+import { resolveAircraftType } from '@shared/semantic/aircraft';
 
 /**
- * Twin-engine type codes from our performance table (lib/perf.ts) — these
- * are the airframes that incur ETOPS rules under FAR 121 Appendix P / ICAO
- * Annex 6 EDTO. Three+ engine types (A380, 747) are exempt.
+ * Twin-engine determination flows through the canonical aircraft ontology
+ * (shared/semantic/aircraft.ts). Single source of truth — change once,
+ * every consumer (planner, divert advisor, ETOPS check) updates.
  */
-const TWIN_ENGINE_PATTERNS = [
-  /\bB?77[0-9W]/i,  // 777 family
-  /\bB?78[0-9]/i,   // 787 family
-  /\bA?33[0-9]/i,   // A330 family
-  /\bA?35[0-9]/i,   // A350 family
-  /\bA?32[0-9]/i,   // A320 family — not typically transoceanic but technically twin
-  /\bB?73[0-9]/i,   // 737 family
-];
-
-const QUAD_OR_TRI_PATTERNS = [
-  /\bA?38[0-9]/i,   // A380
-  /\bB?74[0-9]/i,   // 747
-  /\bB?72[0-9]/i,   // 727 (3-engine)
-  /\bMD-?1[0-9]/i,  // MD-11 / DC-10 (3-engine)
-];
-
 export function isTwinEngine(aircraft: string): boolean {
-  if (QUAD_OR_TRI_PATTERNS.some((re) => re.test(aircraft))) return false;
-  return TWIN_ENGINE_PATTERNS.some((re) => re.test(aircraft));
+  return resolveAircraftType(aircraft)?.engineCount === 2;
 }
 
 /**

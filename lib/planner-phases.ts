@@ -20,9 +20,10 @@ import { getRoster, getAssignments, assignmentsForFlight } from '@/lib/crew';
 import { scoreCrewBatch, REJECT_FATIGUE_THRESHOLD, HIGH_FATIGUE_THRESHOLD } from '@/lib/crew-fatigue';
 import { loadOpsSpecs } from '@/lib/ops-specs';
 import {
-  isTwinEngine, equidistantPoint, findEtopsAlternates,
+  equidistantPoint, findEtopsAlternates,
   computeCriticalFuel, checkAlternateWeather,
 } from '@/lib/etops';
+import { resolveAircraftType, isTypeAuthorized } from '@shared/semantic/aircraft';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -200,34 +201,14 @@ export async function aircraft(f: OwnFlight, authToken: string | null): Promise<
   // within the approved time radius from the equidistant point, fetch
   // current METAR for each, and compute the three critical-fuel scenarios.
   const ops = await loadOpsSpecs(authToken);
-  const twin = isTwinEngine(acft);
-  // OpsSpecs authorizedTypes are typically ICAO codes (B77W, A333, A359).
-  // Three-step match:
-  //   1. exact ICAO match against aircraftIcao
-  //   2. ICAO-family match — B77W vs B77L vs B772 all share the '77' family
-  //   3. permissive substring match against the marketing name (e.g.,
-  //      'Boeing 777' contains '777')
-  // Step 2 lets a tenant authorize the whole 777 family with a single
-  // 'B77W' entry instead of listing every variant.
-  const acftIcao = (f.aircraftIcao ?? '').toUpperCase();
-  const acftTypeFlat = acft.toUpperCase().replace(/\s+/g, '').replace(/-/g, '');
-  const familyToken = (code: string): string => {
-    // e.g. B77W → 77, A333 → 33, A359 → 35, B789 → 78, A388 → 38
-    const m = code.match(/[A-Z]([0-9]{2})/);
-    return m ? m[1] : '';
-  };
-  const typeAuthorized = ops.etopsApproval.authorizedTypes.length === 0
-    || ops.etopsApproval.authorizedTypes.some((t) => {
-        const tt = t.toUpperCase().replace(/\s+/g, '').replace(/-/g, '');
-        if (!tt) return false;
-        if (acftIcao && acftIcao === tt) return true;
-        if (acftIcao && familyToken(acftIcao) && familyToken(acftIcao) === familyToken(tt)) return true;
-        if (acftTypeFlat.includes(tt)) return true;
-        // family numeric token in marketing name — '777' inside 'BOEING777'
-        const fam = familyToken(tt);
-        if (fam && acftTypeFlat.includes(fam)) return true;
-        return false;
-      });
+  // Single canonical type lookup via the semantic layer — handles every
+  // form (ICAO, IATA, marketing, family) through one path.
+  const resolvedType = resolveAircraftType(f.aircraftIcao ?? acft);
+  const twin = resolvedType?.engineCount === 2;
+  const typeAuthorized = isTypeAuthorized(
+    { aircraftIcao: f.aircraftIcao, aircraftType: f.aircraftType ?? acft },
+    ops.etopsApproval.authorizedTypes,
+  );
 
   // First-pass ETOPS trigger: twin + > 1500nm great-circle. Real planning
   // also kicks in if any segment is > 60min from a suitable alternate;
