@@ -192,12 +192,52 @@ async function listOwnFlightsToday(tenantId: string): Promise<APIGatewayProxyRes
     [tenantId],
   );
 
+  // Map marketing names ('Boeing 777-300ER') to ICAO type codes ('B77W').
+  // OpsSpecs B044 authorizedTypes is keyed by ICAO codes, so the planner
+  // needs both representations to do an exact match without dragging the
+  // matching code through every consumer.
+  const deriveIcao = (m: string | undefined): string | undefined => {
+    const t = (m ?? '').toUpperCase();
+    if (!t) return undefined;
+    if (t.includes('777-300ER') || t.includes('777-300') || t.includes('77W')) return 'B77W';
+    if (t.includes('777-200LR')) return 'B77L';
+    if (t.includes('777-200ER') || t.includes('777-200')) return 'B772';
+    if (t.includes('777X') || t.includes('777-9'))        return 'B779';
+    if (t.includes('787-10'))    return 'B78X';
+    if (t.includes('787-9'))     return 'B789';
+    if (t.includes('787-8') || t.includes('787'))         return 'B788';
+    if (t.includes('747-8'))     return 'B748';
+    if (t.includes('747-400'))   return 'B744';
+    if (t.includes('747'))       return 'B744';
+    if (t.includes('A330-900'))  return 'A339';
+    if (t.includes('A330-300'))  return 'A333';
+    if (t.includes('A330-200'))  return 'A332';
+    if (t.includes('A330'))      return 'A333';
+    if (t.includes('A350-1000')) return 'A35K';
+    if (t.includes('A350-900') || t.includes('A350'))     return 'A359';
+    if (t.includes('A380'))      return 'A388';
+    if (t.includes('A340'))      return 'A343';
+    if (t.includes('A321'))      return 'A321';
+    if (t.includes('A320'))      return 'A320';
+    if (t.includes('A319'))      return 'A319';
+    if (t.includes('737-900'))   return 'B739';
+    if (t.includes('737-800') || t.includes('737NG'))     return 'B738';
+    if (t.includes('737 MAX 8') || t.includes('737-8'))   return 'B38M';
+    if (t.includes('737'))       return 'B738';
+    if (t.includes('MD-11'))     return 'MD11';
+    if (t.includes('E190'))      return 'E190';
+    if (t.includes('CRJ-900') || t.includes('CRJ900'))    return 'CRJ9';
+    return undefined;
+  };
+
   // Strip the carrier prefix from flight_number if present (DB stores 'BA1000',
   // canonical wants 'BA' + '1000' separately).
   const flights = rows.map((r) => {
     const raw = r.flight_number ?? '';
     const carrier = r.airline_code;
     const flightNumber = raw.startsWith(carrier) ? raw.slice(carrier.length) : raw;
+    const aircraftType = r.aircraft ?? undefined;
+    const aircraftIcao = deriveIcao(aircraftType);
     return {
       source: 'own' as const,
       externalId: r.id,
@@ -207,7 +247,8 @@ async function listOwnFlightsToday(tenantId: string): Promise<APIGatewayProxyRes
       destination: r.destination_code,
       scheduledDeparture: r.departure_time,
       scheduledArrival:   r.arrival_time,
-      aircraftType: r.aircraft ?? undefined,
+      aircraftType,
+      aircraftIcao,
       paxLoad: r.pax_load ?? 0,
     };
   });
