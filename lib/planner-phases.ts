@@ -201,10 +201,19 @@ export async function aircraft(f: OwnFlight, authToken: string | null): Promise<
   // current METAR for each, and compute the three critical-fuel scenarios.
   const ops = await loadOpsSpecs(authToken);
   const twin = isTwinEngine(acft);
+  // OpsSpecs authorizedTypes are ICAO codes (B77W, A333, A359). Match the
+  // canonical aircraftIcao first; fall back to a permissive substring match
+  // against the marketing name (Boeing 777-300ER) so older mock data
+  // without aircraftIcao still works.
+  const acftIcao = (f.aircraftIcao ?? '').toUpperCase();
+  const acftTypeFlat = acft.toUpperCase().replace(/\s+/g, '').replace(/-/g, '');
   const typeAuthorized = ops.etopsApproval.authorizedTypes.length === 0
-    || ops.etopsApproval.authorizedTypes.some(
-        (t) => acft.toUpperCase().replace(/\s+/g, '').includes(t.toUpperCase()),
-      );
+    || ops.etopsApproval.authorizedTypes.some((t) => {
+        const tt = t.toUpperCase().replace(/\s+/g, '').replace(/-/g, '');
+        if (!tt) return false;
+        if (acftIcao && acftIcao === tt) return true;
+        return acftTypeFlat.includes(tt);
+      });
 
   // First-pass ETOPS trigger: twin + > 1500nm great-circle. Real planning
   // also kicks in if any segment is > 60min from a suitable alternate;
