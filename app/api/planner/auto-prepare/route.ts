@@ -5,8 +5,8 @@ import { getApiBearer } from '@/lib/api-auth';
 import { listRuns, runToCompletion } from '@/lib/planner-orchestrator';
 import type { FlightInput } from '@/lib/planner-phases';
 
-// Synchronous orchestration — bumped from 30s so the request stays open long
-// enough for the longest phase (brief: AviationWeather + FAA NOTAM + Anthropic).
+// Single function invocation streams live NDJSON; bumped from 30s because the
+// brief phase can take 10–25s (AviationWeather + FAA NOTAM + Anthropic).
 // Vercel hobby tier caps at 60s; pro/enterprise allow up to 300s.
 export const maxDuration = 300;
 
@@ -31,20 +31,40 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'flights[] or flight is required' }, { status: 400 });
   }
 
-  // Run all flights in parallel inside this single function invocation. On
-  // serverless, in-memory state doesn't persist across invocations, so the
-  // client can't poll a separate GET — we return the full final Run objects
-  // here and the UI updates once.
-  const runs = await Promise.all(
-    flights.map((f) => runToCompletion(f, authToken, reviewerId)),
-  );
+  // Stream NDJSON: one JSON line per phase transition. The client reads the
+  // body as it arrives and updates the UI live. Everything happens inside
+  // ONE function invocation, so the orchestrator's in-memory state is fine
+  // (we don't need a cross-instance store like KV / Postgres).
+  const enc = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const emit = (line: object) => {
+        controller.enqueue(enc.encode(JSON.stringify(line) + '\n'));
+      };
 
-  return NextResponse.json({
-    runs: runs.map((r) => ({
-      runId: r.id,
-      flight: r.flight.flight,
-      scheduled: r.flight.scheduled,
-      run: r,
-    })),
+      try {
+        await Promise.all(
+          flights.map((f) =>
+            runToCompletion(f, authToken, reviewerId, (run) => {
+              emit({ type: 'update', runId: run.id, flight: f.flight, scheduled: f.scheduled, run });
+            }),
+          ),
+        );
+      } catch (err) {
+        emit({ type: 'error', error: err instanceof Error ? err.message : String(err) });
+      } finally {
+        emit({ type: 'done' });
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    status: 200,
+    headers: {
+      'Content-Type':       'application/x-ndjson; charset=utf-8',
+      'Cache-Control':      'no-cache, no-transform',
+      'X-Accel-Buffering':  'no',  // hint to disable proxy buffering
+    },
   });
 }

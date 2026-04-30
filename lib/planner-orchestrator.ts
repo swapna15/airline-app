@@ -118,22 +118,40 @@ export function startRun(flight: FlightInput, authToken: string | null, reviewer
  * Run. Use this on serverless (Vercel Functions) where in-memory state
  * doesn't persist across invocations: the caller gets the full result back
  * in the response of one HTTP call, so no polling is required.
+ *
+ * Pass a `listener` to receive a snapshot of the run after every phase
+ * transition — useful for streaming live progress over NDJSON.
  */
 export async function runToCompletion(
   flight: FlightInput,
   authToken: string | null,
   reviewerId?: string,
+  listener?: RunListener,
 ): Promise<Run> {
   const run = newRun(flight, reviewerId);
   REG.byId.set(run.id, run);
-  await execute(run, authToken);
+  await execute(run, authToken, listener);
   return run;
 }
 
-async function runOne(run: Run, id: PhaseId, authToken: string | null): Promise<void> {
+/**
+ * Listener called whenever the run state changes (phase enters running, phase
+ * finishes, or run finalizes). Pass-through callers can use this to stream
+ * live progress over NDJSON. The function may be async; we await it so the
+ * listener can flush back-pressure before the next phase starts.
+ */
+export type RunListener = (run: Run) => void | Promise<void>;
+
+async function runOne(
+  run: Run,
+  id: PhaseId,
+  authToken: string | null,
+  listener?: RunListener,
+): Promise<void> {
   const phase = run.phases[id];
   phase.status = 'running';
   phase.startedAt = new Date().toISOString();
+  await listener?.(run);
   const t0 = Date.now();
   try {
     const result = await runPhase(id, run.flight, authToken);
@@ -148,28 +166,30 @@ async function runOne(run: Run, id: PhaseId, authToken: string | null): Promise<
     phase.finishedAt = new Date().toISOString();
     phase.durationMs = Date.now() - t0;
   }
+  await listener?.(run);
 }
 
-async function execute(run: Run, authToken: string | null): Promise<void> {
+async function execute(run: Run, authToken: string | null, listener?: RunListener): Promise<void> {
   // Tier 1 — independent phases run in parallel.
   await Promise.all([
-    runOne(run, 'brief',    authToken),
-    runOne(run, 'route',    authToken),
-    runOne(run, 'crew',     authToken),
-    runOne(run, 'slot_atc', authToken),
+    runOne(run, 'brief',    authToken, listener),
+    runOne(run, 'route',    authToken, listener),
+    runOne(run, 'crew',     authToken, listener),
+    runOne(run, 'slot_atc', authToken, listener),
   ]);
 
   // Tier 2 — aircraft depends on route (ETOPS / oceanic from distance).
   // If route failed, we still attempt aircraft using mocked logic.
-  await runOne(run, 'aircraft', authToken);
+  await runOne(run, 'aircraft', authToken, listener);
 
   // Tier 3 — fuel depends on route + aircraft (block fuel vs MTOW headroom).
-  await runOne(run, 'fuel', authToken);
+  await runOne(run, 'fuel', authToken, listener);
 
   // Tier 4 — weight_balance depends on fuel (block fuel mass into TOW).
-  await runOne(run, 'weight_balance', authToken);
+  await runOne(run, 'weight_balance', authToken, listener);
 
   finalize(run);
+  await listener?.(run);
 }
 
 function finalize(run: Run): void {

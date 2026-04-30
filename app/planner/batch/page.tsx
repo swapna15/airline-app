@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Zap, Loader2, Clock, ArrowRight } from 'lucide-react';
 import { PlannerTabs } from '@/components/PlannerTabs';
 import { AutoPrepareProgress, type AutoPrepareRun } from '@/components/AutoPrepareProgress';
+import { readNdjson } from '@/lib/ndjson';
 
 interface FlightRow {
   id: string;
@@ -108,15 +109,22 @@ export default function PlannerBatchPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ flights }),
       });
-      const json = (await res.json()) as {
-        runs: { run: AutoPrepareRun; flight: string; scheduled: string }[];
-      };
-      const map: Record<string, AutoPrepareRun> = { ...runsByFlight };
-      for (const r of json.runs ?? []) {
-        const row = flights.find((f) => f.flight === r.flight && f.scheduled === r.scheduled);
-        if (row) map[row.id] = r.run;
+      if (!res.ok) return;
+
+      type Line =
+        | { type: 'update'; runId: string; flight: string; scheduled: string; run: AutoPrepareRun }
+        | { type: 'done' }
+        | { type: 'error'; error: string };
+
+      // Each NDJSON line carries one flight's current run snapshot. We
+      // dispatch by (flight, scheduled) → row id so the right row's progress
+      // strip updates as that flight's phases finish.
+      for await (const line of readNdjson<Line>(res)) {
+        if (line.type !== 'update') continue;
+        const row = flights.find((f) => f.flight === line.flight && f.scheduled === line.scheduled);
+        if (!row) continue;
+        setRunsByFlight((prev) => ({ ...prev, [row.id]: line.run }));
       }
-      setRunsByFlight(map);
     } finally {
       setBusy(false);
     }

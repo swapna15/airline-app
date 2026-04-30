@@ -5,6 +5,7 @@ import { useSession } from 'next-auth/react';
 import { Check, AlertTriangle, Loader2, Sparkles, FileSignature, Clock, Lock, Zap } from 'lucide-react';
 import { PlannerTabs } from '@/components/PlannerTabs';
 import { AutoPrepareProgress, type AutoPrepareRun } from '@/components/AutoPrepareProgress';
+import { readNdjson } from '@/lib/ndjson';
 
 type PhaseId =
   | 'brief'
@@ -157,10 +158,9 @@ export default function PlannerPage() {
     }
   }, [plan, released, persistManyPhases]);
 
-  // POST is synchronous: it returns the full completed Run after all phases
-  // finish (~10–25s for one flight). We replaced the earlier
-  // start-then-poll pattern because the orchestrator's in-memory registry
-  // doesn't survive across Vercel Function invocations.
+  // POST returns an NDJSON stream — one JSON line per phase transition. We
+  // update the UI on every line so the planner sees phases flip from gray to
+  // running to ready in real time. Final line is a `{type:"done"}` sentinel.
   const startAutoPrepare = async () => {
     if (!plan || released || autoBusy) return;
     setAutoBusy(true);
@@ -170,12 +170,21 @@ export default function PlannerPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ flight: selected }),
       });
-      const json = (await res.json()) as { runs: { run: AutoPrepareRun }[] };
-      const run = json.runs?.[0]?.run ?? null;
-      if (run) {
-        setAutoRun(run);
-        applyRunToPlan(run);
+      if (!res.ok) return;
+
+      type Line =
+        | { type: 'update'; runId: string; run: AutoPrepareRun }
+        | { type: 'done' }
+        | { type: 'error'; error: string };
+
+      let last: AutoPrepareRun | null = null;
+      for await (const line of readNdjson<Line>(res)) {
+        if (line.type === 'update') {
+          last = line.run;
+          setAutoRun(line.run);
+        }
       }
+      if (last) applyRunToPlan(last);
     } finally {
       setAutoBusy(false);
     }
