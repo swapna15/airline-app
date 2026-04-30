@@ -320,19 +320,40 @@ export default function PlannerPage() {
   const releaseDispatch = async () => {
     if (!plan || released) return;
     const releasedAt = new Date().toISOString();
-    const next: FlightPlan = {
+    const optimisticNext: FlightPlan = {
       ...plan,
       status: 'released',
       releasedAt,
       releasedBy: reviewerId,
       phases: { ...plan.phases, release: { status: 'approved', summary: `Dispatch released ${new Date(releasedAt).toLocaleTimeString()} by ${reviewerId}` } },
     };
-    setPlan(next);
-    await fetch(`/api/planner/plans/${selectedId}`, {
+    setPlan(optimisticNext);
+
+    const res = await fetch(`/api/planner/plans/${selectedId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status: 'released', releasedAt, releasedBy: reviewerId, phases: next.phases }),
+      body: JSON.stringify({
+        status: 'released',
+        releasedAt,
+        releasedBy: reviewerId,
+        phases: optimisticNext.phases,
+      }),
     });
+
+    if (!res.ok) {
+      // Roll the optimistic update back so the UI doesn't lie about a release
+      // that didn't reach Postgres. Surface the failure via the same banner
+      // used by other persist errors.
+      setPlan(plan);
+      await surfaceError(res, 'Release dispatch');
+      return;
+    }
+    setPersistError(null);
+    try {
+      setPlan(normalizePlan(await res.json()));
+    } catch {
+      // server returned 200 with an unparseable body — keep the optimistic state
+    }
     await recordReview('release', 'release');
   };
 
