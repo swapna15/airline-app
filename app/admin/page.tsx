@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Users, Plane, DollarSign, TrendingUp, Settings, ChevronDown, Loader2, Building2, Save, Check, ServerCog, ArrowRight, IdCard, FileText } from 'lucide-react';
+import { Users, Plane, DollarSign, TrendingUp, Settings, ChevronDown, Loader2, Building2, Save, Check, ServerCog, ArrowRight, IdCard, FileText, Brain } from 'lucide-react';
 import type { UserRole } from '@/types/roles';
 import { ROLE_LABELS } from '@/types/roles';
 import { AirlineLogo } from '@/components/AirlineLogo';
@@ -601,6 +601,24 @@ export default function AdminPage() {
                 <p className="text-xs text-gray-500 mt-0.5">
                   Tenant fuel policy, alternate minima (C055), ETOPS approval (B044), PBN authorizations,
                   cost index, authorized airports.
+                </p>
+              </div>
+            </Link>
+            <Link
+              href="/admin/ai/memory"
+              className="group flex items-start gap-3 p-4 rounded-xl border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50/40 transition-colors"
+            >
+              <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                <Brain size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-sm text-gray-900">AI Memory</p>
+                  <ArrowRight size={14} className="text-gray-400 group-hover:text-indigo-600 transition-colors" />
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Per-tenant facts retrieved by the planning agents (RAG). Captures operator-specific
+                  preferences, lessons learned, and policies the agents should know.
                 </p>
               </div>
             </Link>

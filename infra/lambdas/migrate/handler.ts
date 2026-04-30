@@ -18,6 +18,7 @@ const FLIGHT_PLANS_UUID_ID_SQL = readFileSync(join(__dirname, '008_flight_plans_
 const DISPATCHER_CERTS_SQL     = readFileSync(join(__dirname, '009_dispatcher_certifications.sql'), 'utf8');
 const OPS_SPECS_SQL            = readFileSync(join(__dirname, '010_ops_specs.sql'),               'utf8');
 const PBN_OCEANIC_SQL          = readFileSync(join(__dirname, '011_pbn_oceanic_defaults.sql'),    'utf8');
+const AI_CORPUS_SQL            = readFileSync(join(__dirname, '012_ai_corpus.sql'),               'utf8');
 const REFRESH_FLIGHTS_SQL      = readFileSync(join(__dirname, '003_refresh_flight_dates.sql'),    'utf8');
 
 const MIGRATIONS = [
@@ -32,6 +33,7 @@ const MIGRATIONS = [
   { name: '009_dispatcher_certifications', sql: DISPATCHER_CERTS_SQL    },
   { name: '010_ops_specs',                 sql: OPS_SPECS_SQL           },
   { name: '011_pbn_oceanic_defaults',      sql: PBN_OCEANIC_SQL         },
+  { name: '012_ai_corpus',                 sql: AI_CORPUS_SQL           },
 ];
 
 interface MigrateEvent { mode?: 'migrate' | 'refresh-flights' }

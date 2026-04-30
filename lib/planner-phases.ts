@@ -13,7 +13,8 @@ import { lookupAirport } from '@/lib/icao';
 import { fetchMetars, fetchTafs, fetchSigmets } from '@/lib/aviationweather';
 import { fetchNotams } from '@/lib/notams';
 import { fuelEstimate, initialBearing } from '@/lib/perf';
-import { planningAgent } from '@/core/agents/PlanningAgent';
+import { runAgent } from '@/core/agents/planning/PlannerOrchestrator';
+import { tenantFromToken } from '@/lib/ai/tenant';
 import { listRejectionComments } from '@/lib/planner-store';
 import type { OwnFlight } from '@shared/schema/flight';
 import { getRoster, getAssignments, assignmentsForFlight } from '@/lib/crew';
@@ -63,6 +64,35 @@ function depTimeHHmm(f: OwnFlight): string {
 }
 function aircraftLabel(f: OwnFlight): string {
   return f.aircraftType ?? f.aircraftIcao ?? 'unknown';
+}
+
+/**
+ * Backfill recent rejection comments into the vector store as kind='rejection'
+ * so the per-phase agents pick them up via RAG. Idempotent — vector-store
+ * upsert keys on (tenantId, id), so running this every request is safe;
+ * later this is replaced by a one-shot sync per tenant.
+ */
+async function backfillRejectionsToVectorStore(
+  tenantId: string,
+  phase: string,
+  rejections: PastRejection[],
+): Promise<void> {
+  if (!rejections.length) return;
+  const { getVectorStore } = await import('@/lib/ai/vector-store');
+  const store = getVectorStore();
+  await Promise.all(
+    rejections.map((r, i) =>
+      store.upsert({
+        id: `rejection-${phase}-${r.createdAt}-${i}`,
+        tenantId,
+        kind: 'rejection',
+        phase,
+        text: r.comment,
+        source: `planner-rejection:${phase}`,
+        createdAt: r.createdAt,
+      }),
+    ),
+  );
 }
 
 async function loadPastBriefRejections(token: string | null): Promise<PastRejection[]> {
@@ -115,15 +145,31 @@ export async function brief(f: OwnFlight, authToken: string | null): Promise<Pha
     notams: notams.items.slice(0, 6).map((n) => ({ at: n.location, text: n.text })),
   };
 
+  // Backfill historical rejection comments into the vector store so the
+  // BriefAgent retrieves them as part of its RAG context. Idempotent —
+  // upsert by id. Safe to run on every brief() invocation while the corpus
+  // is small; later this moves to a one-time sync job per tenant.
+  const tenantId = tenantFromToken(authToken);
   const pastRejections = await loadPastBriefRejections(authToken);
-  const summary = await planningAgent.summarize(facts, pastRejections);
+  await backfillRejectionsToVectorStore(tenantId, 'brief', pastRejections);
+
+  // Multi-agent dispatch: the BriefAgent owns this phase's narrative. It
+  // pulls rejection comments + SOPs + memory via RAG and re-phrases the
+  // structured facts into the briefing line the dispatcher reads.
+  const agentResult = await runAgent({
+    phase: 'brief',
+    facts,
+    context: { tenantId, airlineName: f.carrier },
+  });
+  const summary = agentResult?.text ?? '';
 
   const sourceParts = [
     metars.length ? 'aviationweather:metar' : null,
     tafs.length ? 'aviationweather:taf' : null,
     sigmets.length ? 'aviationweather:isigmet' : null,
     `notam:${notams.source}`,
-    pastRejections.length ? `${pastRejections.length} past rejections informed` : null,
+    agentResult?.retrievalSource || (pastRejections.length ? `${pastRejections.length} past rejections informed` : null),
+    'agent:BriefAgent',
   ].filter(Boolean);
 
   return {
