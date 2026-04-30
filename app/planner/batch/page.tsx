@@ -11,7 +11,6 @@ import {
   displayFlightNo,
   displayDepartureTime,
   todayAt,
-  toFlightInput,
   minutesUntilDeparture,
 } from '@/lib/flight-display';
 
@@ -98,27 +97,28 @@ export default function PlannerBatchPage() {
       const res = await fetch('/api/planner/auto-prepare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ flights: flights.map(toFlightInput) }),
+        body: JSON.stringify({ flights }),
       });
       if (!res.ok) return;
 
       type Line =
-        | { type: 'update'; runId: string; flight: string; scheduled: string; run: AutoPrepareRun }
+        | {
+            type: 'update';
+            runId: string;
+            externalId: string;
+            carrier: string;
+            flightNumber: string;
+            scheduledDeparture: string;
+            run: AutoPrepareRun;
+          }
         | { type: 'done' }
         | { type: 'error'; error: string };
 
-      // Each NDJSON line carries one flight's current run snapshot. We
-      // dispatch back to the right row by matching on the FlightInput shape
-      // we sent (carrier+number string and HH:MM time).
+      // Each NDJSON line carries one flight's current run snapshot — dispatch
+      // back to the right row by canonical externalId.
       for await (const line of readNdjson<Line>(res)) {
         if (line.type !== 'update') continue;
-        const row = flights.find(
-          (f) =>
-            displayFlightNo(f) === line.flight &&
-            displayDepartureTime(f.scheduledDeparture) === line.scheduled,
-        );
-        if (!row) continue;
-        setRunsByFlight((prev) => ({ ...prev, [row.externalId]: line.run }));
+        setRunsByFlight((prev) => ({ ...prev, [line.externalId]: line.run }));
       }
     } finally {
       setBusy(false);

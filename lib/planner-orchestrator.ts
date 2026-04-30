@@ -13,6 +13,7 @@
  */
 
 import { runPhase, type FlightInput, type PhaseId } from '@/lib/planner-phases';
+import { flightKey as canonicalFlightKey } from '@shared/schema/flight';
 
 export type RunPhaseStatus = 'pending' | 'running' | 'ready' | 'failed';
 
@@ -54,8 +55,10 @@ const REG: Registry =
 
 const ALL_PHASES: PhaseId[] = ['brief', 'route', 'crew', 'slot_atc', 'aircraft', 'fuel', 'weight_balance'];
 
+// Wrap the canonical key so the registry's internal de-dup is consistent
+// with cross-source matching anywhere else in the codebase.
 function flightKey(f: FlightInput): string {
-  return `${f.flight}|${f.scheduled}|${f.origin}-${f.destination}`;
+  return canonicalFlightKey(f);
 }
 
 function newRunId(): string {

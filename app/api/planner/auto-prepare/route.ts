@@ -3,7 +3,8 @@ import { getServerSession } from 'next-auth';
 import { authOptions } from '@/auth';
 import { getApiBearer } from '@/lib/api-auth';
 import { listRuns, runToCompletion } from '@/lib/planner-orchestrator';
-import type { FlightInput } from '@/lib/planner-phases';
+import { flightSchema, type OwnFlight } from '@shared/schema/flight';
+import { z } from 'zod';
 
 // Single function invocation streams live NDJSON; bumped from 30s because the
 // brief phase can take 10–25s (AviationWeather + FAA NOTAM + Anthropic).
@@ -14,10 +15,16 @@ export async function GET() {
   return NextResponse.json({ runs: listRuns().slice(0, 50) });
 }
 
-interface PostBody {
-  flights?: FlightInput[];
-  flight?: FlightInput;
-}
+// Validate the request body against the canonical schema. We restrict
+// auto-prepare to source: 'own' — only operational flights can be planned.
+const ownFlightSchema = flightSchema.refine(
+  (f): f is OwnFlight => f.source === 'own',
+  { message: 'auto-prepare only accepts source: "own" flights' },
+);
+const postBodySchema = z.object({
+  flight:  ownFlightSchema.optional(),
+  flights: z.array(ownFlightSchema).optional(),
+});
 
 export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
@@ -25,8 +32,12 @@ export async function POST(req: NextRequest) {
   const reviewerId = (session.user as { email?: string }).email ?? 'anonymous';
   const authToken  = await getApiBearer(req);
 
-  const body = (await req.json()) as PostBody;
-  const flights: FlightInput[] = body.flights ?? (body.flight ? [body.flight] : []);
+  const raw = await req.json();
+  const parsed = postBodySchema.safeParse(raw);
+  if (!parsed.success) {
+    return NextResponse.json({ error: 'invalid body', detail: parsed.error.flatten() }, { status: 400 });
+  }
+  const flights: OwnFlight[] = parsed.data.flights ?? (parsed.data.flight ? [parsed.data.flight] : []);
   if (flights.length === 0) {
     return NextResponse.json({ error: 'flights[] or flight is required' }, { status: 400 });
   }
@@ -46,7 +57,17 @@ export async function POST(req: NextRequest) {
         await Promise.all(
           flights.map((f) =>
             runToCompletion(f, authToken, reviewerId, (run) => {
-              emit({ type: 'update', runId: run.id, flight: f.flight, scheduled: f.scheduled, run });
+              // Emit the externalId so clients can dispatch this update back
+              // to the right row by canonical identity, not display strings.
+              emit({
+                type: 'update',
+                runId: run.id,
+                externalId: f.externalId,
+                carrier: f.carrier,
+                flightNumber: f.flightNumber,
+                scheduledDeparture: f.scheduledDeparture,
+                run,
+              });
             }),
           ),
         );

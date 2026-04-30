@@ -7,7 +7,7 @@ import { PlannerTabs } from '@/components/PlannerTabs';
 import { AutoPrepareProgress, type AutoPrepareRun } from '@/components/AutoPrepareProgress';
 import { readNdjson } from '@/lib/ndjson';
 import type { OwnFlight } from '@shared/schema/flight';
-import { displayFlightNo, displayDepartureTime, toFlightInput, todayAt } from '@/lib/flight-display';
+import { displayFlightNo, displayDepartureTime, todayAt } from '@/lib/flight-display';
 
 type PhaseId =
   | 'brief'
@@ -215,7 +215,7 @@ export default function PlannerPage() {
       const res = await fetch('/api/planner/auto-prepare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ flight: toFlightInput(selected) }),
+        body: JSON.stringify({ flight: selected }),
       });
       if (!res.ok) return;
 
@@ -254,7 +254,7 @@ export default function PlannerPage() {
       const res = await fetch(`/api/planner/${id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ flight: toFlightInput(selected) }),
+        body: JSON.stringify({ flight: selected }),
       });
       const data = await res.json();
       await persistPhase(id, { status: 'ready', summary: data.summary, source: data.source, data: data.data });

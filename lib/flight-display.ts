@@ -10,7 +10,6 @@
  */
 
 import type { OwnFlight } from '@shared/schema/flight';
-import type { FlightInput } from '@/lib/planner-phases';
 
 /** 'BA' + '1000' → 'BA1000'. */
 export function displayFlightNo(f: Pick<OwnFlight, 'carrier' | 'flightNumber'>): string {
@@ -33,20 +32,6 @@ export function todayAt(hhmm: string): string {
   const d = new Date();
   d.setHours(h, m, 0, 0);
   return d.toISOString();
-}
-
-/** Adapter: canonical OwnFlight → legacy FlightInput shape that the
- *  auto-prepare orchestrator still expects. Lets us migrate the mocks now
- *  and migrate the orchestrator to canonical OwnFlight in a follow-up. */
-export function toFlightInput(f: OwnFlight): FlightInput {
-  return {
-    flight:      displayFlightNo(f),
-    origin:      f.origin,
-    destination: f.destination,
-    scheduled:   displayDepartureTime(f.scheduledDeparture),
-    aircraft:    f.aircraftType ?? f.aircraftIcao ?? 'Unknown',
-    paxLoad:     f.paxLoad ?? 0,
-  };
 }
 
 /** Minutes between now and the flight's scheduled departure. Negative if past. */

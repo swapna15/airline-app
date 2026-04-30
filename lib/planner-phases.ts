@@ -15,6 +15,7 @@ import { fetchNotams } from '@/lib/notams';
 import { fuelEstimate, initialBearing } from '@/lib/perf';
 import { planningAgent } from '@/core/agents/PlanningAgent';
 import { listRejectionComments } from '@/lib/planner-store';
+import type { OwnFlight } from '@shared/schema/flight';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -31,14 +32,15 @@ export const VALID_PHASES: ReadonlySet<string> = new Set<PhaseId>([
   'brief', 'aircraft', 'route', 'fuel', 'weight_balance', 'crew', 'slot_atc',
 ]);
 
-export interface FlightInput {
-  flight: string;
-  origin: string;
-  destination: string;
-  scheduled: string;
-  aircraft: string;
-  paxLoad: number;
-}
+/**
+ * Phase functions consume the canonical OwnFlight directly. The legacy
+ * `FlightInput` shape was a stripped-down ad-hoc DTO; we keep the alias for
+ * one release so existing call sites still work, but new code should depend
+ * on `OwnFlight` from `@shared/schema/flight`.
+ *
+ * @deprecated Import `OwnFlight` from '@shared/schema/flight' instead.
+ */
+export type FlightInput = OwnFlight;
 
 export interface PhaseResult {
   summary: string;
@@ -47,6 +49,19 @@ export interface PhaseResult {
 }
 
 interface PastRejection { phase: string; comment: string; createdAt: string }
+
+// Internal display helpers — the phase functions output human-readable summaries,
+// so we collapse the canonical structured fields into the same strings the UI shows.
+function flightNo(f: OwnFlight): string {
+  return `${f.carrier}${f.flightNumber}`;
+}
+function depTimeHHmm(f: OwnFlight): string {
+  const d = new Date(f.scheduledDeparture);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')} UTC`;
+}
+function aircraftLabel(f: OwnFlight): string {
+  return f.aircraftType ?? f.aircraftIcao ?? 'unknown';
+}
 
 async function loadPastBriefRejections(token: string | null): Promise<PastRejection[]> {
   if (API_URL && token) {
@@ -88,7 +103,7 @@ export async function brief(f: FlightInput, authToken: string | null): Promise<P
   const notams  = notamsR.status === 'fulfilled' ? notamsR.value : { items: [], source: 'mock' as const };
 
   const facts = {
-    flight: f.flight,
+    flight: flightNo(f),
     origin: { iata: o.iata, icao: o.icao, name: o.name },
     destination: { iata: d.iata, icao: d.icao, name: d.name },
     metars: metars.map((m) => ({ id: m.icaoId, raw: m.rawOb, fltCat: m.fltCat })),
@@ -123,7 +138,7 @@ export function route(f: FlightInput): PhaseResult {
     return { summary: 'Airport reference missing; route skipped.', data: { error: 'unknown_airport' }, source: 'planner-internal' };
   }
 
-  const fe = fuelEstimate(o, d, f.aircraft);
+  const fe = fuelEstimate(o, d, aircraftLabel(f));
   const bearing = Math.round(initialBearing(o, d));
   const filed = `${o.icao} DCT ${d.icao}`;
   const summary =
@@ -145,9 +160,9 @@ export function fuel(f: FlightInput): PhaseResult {
     return { summary: 'Airport reference missing; fuel skipped.', data: { error: 'unknown_airport' }, source: 'planner-internal' };
   }
 
-  const fe = fuelEstimate(o, d, f.aircraft);
+  const fe = fuelEstimate(o, d, aircraftLabel(f));
   const summary =
-    `Fuel estimate (${f.aircraft}): trip ${fe.trip.toLocaleString()} kg · contingency ${fe.contingency.toLocaleString()} kg ` +
+    `Fuel estimate (${aircraftLabel(f)}): trip ${fe.trip.toLocaleString()} kg · contingency ${fe.contingency.toLocaleString()} kg ` +
     `(5%) · alternate ${fe.alternate.toLocaleString()} kg (45 min) · reserve ${fe.reserve.toLocaleString()} kg (30 min) · ` +
     `taxi ${fe.taxi} kg. Block fuel ${fe.block.toLocaleString()} kg vs MTOW ${fe.mtowKg.toLocaleString()} kg.`;
 
@@ -155,21 +170,24 @@ export function fuel(f: FlightInput): PhaseResult {
 }
 
 export function aircraft(f: FlightInput): PhaseResult {
+  // Real path: lookup f.tail in fleet system; mocked here.
+  const tail = f.tail ?? 'G-XLEK';
   return {
     summary:
-      `Recommended tail: G-XLEK (${f.aircraft}). ETOPS 180 current, no MEL items affecting this route. ` +
+      `Recommended tail: ${tail} (${aircraftLabel(f)}). ETOPS 180 current, no MEL items affecting this route. ` +
       `Last C-check 14d ago, next due in 89d. [mocked — fleet system not integrated]`,
-    data: { tail: 'G-XLEK', etops: 180, melItems: [] },
+    data: { tail, etops: 180, melItems: [] },
     source: 'mock://fleet-system',
   };
 }
 
 export function weightBalance(f: FlightInput): PhaseResult {
+  const pax = f.paxLoad ?? 0;
   return {
     summary:
       `ZFW 198,200 kg · TOW 267,120 kg · LDW 208,720 kg. CG at TOW 24.3% MAC (envelope 18-32%). ` +
-      `${f.paxLoad} pax loaded, cargo 14.2t. Within all limits. [mocked — load planning not integrated]`,
-    data: { zfw: 198200, tow: 267120, ldw: 208720, cgPct: 24.3 },
+      `${pax} pax loaded, cargo 14.2t. Within all limits. [mocked — load planning not integrated]`,
+    data: { zfw: 198200, tow: 267120, ldw: 208720, cgPct: 24.3, paxLoad: pax },
     source: 'mock://load-planning',
   };
 }
@@ -185,11 +203,12 @@ export function crew(): PhaseResult {
 }
 
 export function slotAtc(f: FlightInput): PhaseResult {
+  const std = depTimeHHmm(f);
   return {
     summary:
-      `CTOT confirmed: STD ${f.scheduled} (no ATFM regulation). ICAO FPL submission pending. ` +
+      `CTOT confirmed: STD ${std} (no ATFM regulation). ICAO FPL submission pending. ` +
       `[mocked — Eurocontrol NM not integrated]`,
-    data: { ctot: f.scheduled, ifpsAccepted: false, regulation: null },
+    data: { ctot: f.scheduledDeparture, ifpsAccepted: false, regulation: null },
     source: 'mock://eurocontrol-nm',
   };
 }
