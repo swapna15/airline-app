@@ -2,6 +2,7 @@ import type { FuelPrice, FuelPriceProvider } from './types';
 import type { ProviderHealthResult } from '../types';
 import { resolveSecret } from '../secrets';
 import { ttlCached, invalidate } from '../cache';
+import { fuelPriceSchema } from '@shared/schema/fuel-price';
 
 /**
  * Reads jet-fuel prices from a REST endpoint with token auth.
@@ -147,9 +148,26 @@ export class ApiFuelPriceProvider implements FuelPriceProvider {
       const payload = await res.json();
       const records = unwrapArray(payload);
       const out = new Map<string, FuelPrice>();
+      let dropped = 0;
       for (const r of records) {
-        const fp = recordToFuelPrice(r);
-        if (fp) out.set(fp.icao, fp);
+        const mapped = recordToFuelPrice(r);
+        if (!mapped) { dropped++; continue; }
+        // Validate the canonical-shape record. Anything that fails the schema
+        // is logged and dropped — fail-soft so one bad row from a feed can't
+        // take the whole load down. The error includes which fields failed.
+        const parsed = fuelPriceSchema.safeParse(mapped);
+        if (!parsed.success) {
+          console.warn(
+            `[fuel-price api] dropping invalid record for ${mapped.icao}:`,
+            parsed.error.flatten().fieldErrors,
+          );
+          dropped++;
+          continue;
+        }
+        out.set(parsed.data.icao, parsed.data);
+      }
+      if (dropped > 0) {
+        console.warn(`[fuel-price api] dropped ${dropped} of ${records.length} records as invalid`);
       }
       return out;
     });

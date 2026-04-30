@@ -2,6 +2,7 @@ import type { CrewMember, CrewAssignment, CrewProvider } from './types';
 import type { ProviderHealthResult } from '../types';
 import { resolveSecret } from '../secrets';
 import { ttlCached, invalidate } from '../cache';
+import { crewMemberSchema, crewAssignmentSchema } from '@shared/schema/crew';
 
 /**
  * Reads roster + assignments from a REST endpoint with token auth (Sabre,
@@ -143,9 +144,23 @@ export class ApiCrewProvider implements CrewProvider {
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} fetching ${this.config.rosterUrl}`);
       const records = unwrap<ApiRosterRecord>(await res.json(), ['data', 'results', 'roster', 'items']);
       const out: CrewMember[] = [];
+      let dropped = 0;
       for (const r of records) {
         const m = rosterToCrew(r, this.name);
-        if (m) out.push(m);
+        if (!m) { dropped++; continue; }
+        const parsed = crewMemberSchema.safeParse(m);
+        if (!parsed.success) {
+          console.warn(
+            `[crew api] dropping invalid roster row id=${m.id}:`,
+            parsed.error.flatten().fieldErrors,
+          );
+          dropped++;
+          continue;
+        }
+        out.push(parsed.data);
+      }
+      if (dropped > 0) {
+        console.warn(`[crew api] dropped ${dropped} of ${records.length} roster records as invalid`);
       }
       return out;
     });
@@ -158,10 +173,17 @@ export class ApiCrewProvider implements CrewProvider {
       if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText} fetching ${this.config.assignmentsUrl}`);
       const records = unwrap<ApiAssignmentRecord>(await res.json(), ['data', 'results', 'assignments', 'items']);
       const out: CrewAssignment[] = [];
+      let dropped = 0;
       for (const r of records) {
         const crewId = str(r.crewId, r.crew_id);
         const flight = str(r.flight);
-        if (crewId && flight) out.push({ crewId, flight });
+        if (!crewId || !flight) { dropped++; continue; }
+        const parsed = crewAssignmentSchema.safeParse({ crewId, flight });
+        if (!parsed.success) { dropped++; continue; }
+        out.push(parsed.data);
+      }
+      if (dropped > 0) {
+        console.warn(`[crew api] dropped ${dropped} of ${records.length} assignment records as invalid`);
       }
       return out;
     });

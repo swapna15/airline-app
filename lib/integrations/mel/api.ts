@@ -2,6 +2,7 @@ import type { DeferredItem, MelProvider } from './types';
 import type { ProviderHealthResult } from '../types';
 import { resolveSecret } from '../secrets';
 import { ttlCached, invalidate } from '../cache';
+import { deferredItemSchema } from '@shared/schema/mel';
 
 /**
  * Reads MEL deferrals from a REST endpoint with token auth (AMOS, TRAX, or
@@ -137,9 +138,23 @@ export class ApiMelProvider implements MelProvider {
       const records = unwrapArray(payload);
       const today = Date.now();
       const out: DeferredItem[] = [];
+      let dropped = 0;
       for (const r of records) {
         const d = recordToDeferral(r, this.name, today);
-        if (d) out.push(d);
+        if (!d) { dropped++; continue; }
+        const parsed = deferredItemSchema.safeParse(d);
+        if (!parsed.success) {
+          console.warn(
+            `[mel api] dropping invalid deferral ${d.tail}/${d.melId}:`,
+            parsed.error.flatten().fieldErrors,
+          );
+          dropped++;
+          continue;
+        }
+        out.push(parsed.data);
+      }
+      if (dropped > 0) {
+        console.warn(`[mel api] dropped ${dropped} of ${records.length} records as invalid`);
       }
       return out;
     });
