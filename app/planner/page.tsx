@@ -90,18 +90,48 @@ export default function PlannerPage() {
   const phases = plan?.phases;
   const released = plan?.status === 'released';
 
-  // Load plan whenever the selected flight changes.
+  // Empty-phases template — used when the upstream returns a partial or
+  // missing phases map (auth error, network glitch, etc.) so downstream code
+  // can always assume all 8 keys exist.
+  const emptyPhases = useCallback((): PhasesMap => ({
+    brief:          { status: 'pending' },
+    aircraft:       { status: 'pending' },
+    route:          { status: 'pending' },
+    fuel:           { status: 'pending' },
+    weight_balance: { status: 'pending' },
+    crew:           { status: 'pending' },
+    slot_atc:       { status: 'pending' },
+    release:        { status: 'pending' },
+  }), []);
+
+  const normalizePlan = useCallback((raw: unknown): FlightPlan => {
+    const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<FlightPlan>;
+    return {
+      flightId: r.flightId ?? selectedId,
+      status:   r.status   ?? 'draft',
+      phases:   { ...emptyPhases(), ...(r.phases ?? {}) },
+      releasedAt: r.releasedAt,
+      releasedBy: r.releasedBy,
+    };
+  }, [selectedId, emptyPhases]);
+
+  // Load plan whenever the selected flight changes. Defensive: any non-OK
+  // response (auth error, 5xx, malformed body) falls back to a fresh empty
+  // plan so the UI doesn't crash on `plan.phases[id]`.
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setAutoRun(null);
     setAutoBusy(false);
     fetch(`/api/planner/plans/${selectedId}`)
-      .then((r) => r.json())
-      .then((p: FlightPlan) => { if (!cancelled) setPlan(p); })
+      .then(async (r) => {
+        if (!r.ok) return null;
+        try { return await r.json(); } catch { return null; }
+      })
+      .then((raw) => { if (!cancelled) setPlan(normalizePlan(raw)); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [selectedId]);
+  }, [selectedId, normalizePlan]);
 
   const persistPhase = useCallback(async (id: PhaseId, next: PhaseState) => {
     if (!plan) return;
@@ -112,8 +142,10 @@ export default function PlannerPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phases: { [id]: next } }),
     });
-    if (res.ok) setPlan(await res.json());
-  }, [plan, selectedId]);
+    if (res.ok) {
+      try { setPlan(normalizePlan(await res.json())); } catch { /* keep optimistic */ }
+    }
+  }, [plan, selectedId, normalizePlan]);
 
   const persistManyPhases = useCallback(async (updates: Partial<PhasesMap>) => {
     if (!plan) return;
@@ -129,19 +161,21 @@ export default function PlannerPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ phases: updates }),
     });
-    if (res.ok) setPlan(await res.json());
-  }, [plan, selectedId]);
+    if (res.ok) {
+      try { setPlan(normalizePlan(await res.json())); } catch { /* keep optimistic */ }
+    }
+  }, [plan, selectedId, normalizePlan]);
 
   // Fold completed phases into the plan as `ready` so the planner can
   // approve/reject them through the existing per-phase UI.
   const applyRunToPlan = useCallback((run: AutoPrepareRun) => {
-    if (!plan || released) return;
+    if (!plan || !plan.phases || released) return;
     const updates: Partial<PhasesMap> = {};
-    const runPhaseIds = Object.keys(run.phases) as (keyof typeof run.phases)[];
+    const runPhaseIds = Object.keys(run.phases ?? {}) as (keyof typeof run.phases)[];
     for (const id of runPhaseIds) {
       const rp = run.phases[id];
-      const cur = plan.phases[id as PhaseId];
-      if (rp.status === 'ready' && cur.status !== 'approved' && cur.summary !== rp.summary) {
+      const cur = plan.phases[id as PhaseId] ?? { status: 'pending' as const };
+      if (rp?.status === 'ready' && cur.status !== 'approved' && cur.summary !== rp.summary) {
         updates[id as PhaseId] = {
           status: 'ready',
           summary: rp.summary,
@@ -149,7 +183,7 @@ export default function PlannerPage() {
           data: rp.data,
         };
       }
-      if (rp.status === 'failed' && cur.status === 'pending') {
+      if (rp?.status === 'failed' && cur.status === 'pending') {
         updates[id as PhaseId] = { status: 'rejected', comment: rp.error ?? 'auto-prepare failed' };
       }
     }
@@ -226,12 +260,12 @@ export default function PlannerPage() {
   // (human review still required by design); this is the one-click bridge to
   // get from auto-prepare to a state where Release Dispatch enables.
   const approveAllReady = async () => {
-    if (!plan || released) return;
+    if (!plan || !plan.phases || released) return;
     const updates: Partial<PhasesMap> = {};
     const ready: PhaseId[] = [];
     for (const p of PHASES.slice(0, -1)) {
       const ph = plan.phases[p.id];
-      if (ph.status === 'ready') {
+      if (ph && ph.status === 'ready') {
         updates[p.id] = { ...ph, status: 'approved' };
         ready.push(p.id);
       }
@@ -270,8 +304,8 @@ export default function PlannerPage() {
   };
 
   const reviewablePhases = PHASES.slice(0, -1);
-  const approvedCount = phases ? reviewablePhases.filter((p) => phases[p.id].status === 'approved').length : 0;
-  const readyCount    = phases ? reviewablePhases.filter((p) => phases[p.id].status === 'ready').length : 0;
+  const approvedCount = phases ? reviewablePhases.filter((p) => phases[p.id]?.status === 'approved').length : 0;
+  const readyCount    = phases ? reviewablePhases.filter((p) => phases[p.id]?.status === 'ready').length    : 0;
   const allApproved   = approvedCount === reviewablePhases.length;
 
   return (
@@ -358,7 +392,7 @@ export default function PlannerPage() {
         ) : (
           <ol className="space-y-3">
             {PHASES.map((p, i) => {
-              const ph = phases[p.id];
+              const ph = phases[p.id] ?? { status: 'pending' as const };
               const isReleasePhase = p.id === 'release';
               return (
                 <li key={p.id} className="border border-gray-200 rounded-xl p-4">
