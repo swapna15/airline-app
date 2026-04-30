@@ -98,6 +98,10 @@ export async function loadOpsSpecs(authToken: string | null): Promise<OpsSpecs> 
   try {
     const res = await fetch(`${API_URL}/admin/ops-specs`, {
       headers: { Authorization: `Bearer ${authToken}` },
+      // Without this, Next.js caches the response per-URL forever in Route
+      // Handlers — saving a new authorized list in /admin/ops-specs would
+      // never take effect for the divert route until the server restarted.
+      cache: 'no-store',
     });
     if (!res.ok) return DEFAULT_OPS_SPECS;
     const raw = await res.json() as Partial<OpsSpecs>;
