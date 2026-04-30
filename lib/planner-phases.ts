@@ -16,6 +16,8 @@ import { fuelEstimate, initialBearing } from '@/lib/perf';
 import { planningAgent } from '@/core/agents/PlanningAgent';
 import { listRejectionComments } from '@/lib/planner-store';
 import type { OwnFlight } from '@shared/schema/flight';
+import { getRoster, getAssignments, assignmentsForFlight } from '@/lib/crew';
+import { scoreCrewBatch, REJECT_FATIGUE_THRESHOLD, HIGH_FATIGUE_THRESHOLD } from '@/lib/crew-fatigue';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -185,13 +187,53 @@ export function weightBalance(f: OwnFlight): PhaseResult {
   };
 }
 
-export function crew(): PhaseResult {
+export async function crew(f: OwnFlight): Promise<PhaseResult> {
+  // Pull the current roster + assignment snapshot (provider-cached so multiple
+  // phases per request don't fan out into separate fetches).
+  const [roster, assignments] = await Promise.all([getRoster(), getAssignments()]);
+  const flightNo = `${f.carrier}${f.flightNumber}`;
+  const assigned = assignmentsForFlight(roster, assignments, flightNo);
+
+  if (assigned.length === 0) {
+    return {
+      summary: `No crew assigned to ${flightNo}. Crew system shows no pairing — coordinate with crew control.`,
+      data: { flightNo, assigned: [], fatigue: [], maxScore: 0 },
+      source: 'crew-provider (no assignment)',
+    };
+  }
+
+  const fatigue = scoreCrewBatch(assigned, { origin: f.origin, destination: f.destination });
+  const maxScore = Math.max(0, ...fatigue.map((s) => s.score));
+  const highFatigue = fatigue.filter((s) => s.flag === 'high_fatigue');
+  const rejected    = fatigue.filter((s) => s.flag === 'reject');
+
+  // Build a one-line headline + per-crew detail lines.
+  const lines: string[] = [
+    `${assigned.length}-crew assigned (${assigned.filter((c) => c.role === 'CAP').length} CAP, ${assigned.filter((c) => c.role === 'FO').length} FO).`,
+  ];
+  if (rejected.length > 0) {
+    lines.push(`⛔ Crew above ${REJECT_FATIGUE_THRESHOLD} fatigue (dispatch blocked): ${rejected.map((r) => `${r.name} (${r.score})`).join(', ')}.`);
+  } else if (highFatigue.length > 0) {
+    lines.push(`⚠ Elevated fatigue (>${HIGH_FATIGUE_THRESHOLD}): ${highFatigue.map((r) => `${r.name} (${r.score})`).join(', ')}.`);
+  } else {
+    lines.push(`Max fatigue score ${maxScore}/100 — within limits.`);
+  }
+  for (const s of fatigue) {
+    lines.push(`  · ${s.name} (${s.crewId}): score ${s.score} — FDP ${s.breakdown.fdp}, rest ${s.breakdown.rest}, TZ ${s.breakdown.timezone}`);
+  }
+
   return {
-    summary:
-      `4-pilot crew assigned (augmented). All current on type, recurrent within 90d. ` +
-      `FDP planned 9h 12m vs max 14h. CC: 12 cabin crew, all currency valid. [mocked — crew system not integrated]`,
-    data: { pilots: 4, cabinCrew: 12, fdpMinutes: 552, fdpMaxMinutes: 840 },
-    source: 'mock://crew-scheduling',
+    summary: lines.join('\n'),
+    data: {
+      flightNo,
+      assigned: assigned.map((c) => ({ id: c.id, name: c.name, role: c.role, base: c.base })),
+      fatigue,
+      maxScore,
+      blocked: rejected.length > 0,
+    },
+    source: rejected.length > 0
+      ? `crew-provider + fatigue-calc (BLOCKED: ${rejected.length} above ${REJECT_FATIGUE_THRESHOLD})`
+      : `crew-provider + fatigue-calc`,
   };
 }
 
@@ -213,7 +255,7 @@ export async function runPhase(id: PhaseId, f: OwnFlight, authToken: string | nu
     case 'fuel':           return fuel(f);
     case 'aircraft':       return aircraft(f);
     case 'weight_balance': return weightBalance(f);
-    case 'crew':           return crew();
+    case 'crew':           return crew(f);
     case 'slot_atc':       return slotAtc(f);
   }
 }

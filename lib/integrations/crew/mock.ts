@@ -9,9 +9,13 @@ import type { ProviderHealthResult } from '../types';
 
 const ROSTER: CrewMember[] = [
   // 777 crew
-  { id: 'C001', name: 'Allen, K.',   role: 'CAP', base: 'JFK', typeRatings: ['777'],          priorFdpMin: 0, priorFlightTimeMin: 0, restMinSinceLastDuty: 14 * 60, status: 'active', source: 'mock' },
+  // Allen carries accumulated FDP and a short rest gap — exercises the
+  // high_fatigue path (~70+ score on a TZ-crossing sector).
+  { id: 'C001', name: 'Allen, K.',   role: 'CAP', base: 'JFK', typeRatings: ['777'],          priorFdpMin: 50 * 60, priorFlightTimeMin: 35 * 60, restMinSinceLastDuty:  9 * 60, status: 'active', source: 'mock' },
   { id: 'C002', name: 'Bennett, R.', role: 'CAP', base: 'LHR', typeRatings: ['777'],          priorFdpMin: 0, priorFlightTimeMin: 0, restMinSinceLastDuty: 12 * 60, status: 'active', source: 'mock' },
-  { id: 'F001', name: 'Foster, J.',  role: 'FO',  base: 'JFK', typeRatings: ['777'],          priorFdpMin: 0, priorFlightTimeMin: 0, restMinSinceLastDuty: 14 * 60, status: 'active', source: 'mock' },
+  // Foster is at the regulatory edge — pushes above 85 to verify the reject
+  // path (dispatch should be blocked when this crew is assigned).
+  { id: 'F001', name: 'Foster, J.',  role: 'FO',  base: 'JFK', typeRatings: ['777'],          priorFdpMin: 58 * 60, priorFlightTimeMin: 40 * 60, restMinSinceLastDuty:  6 * 60, status: 'active', source: 'mock' },
   { id: 'F002', name: 'Garcia, T.',  role: 'FO',  base: 'LHR', typeRatings: ['777'],          priorFdpMin: 0, priorFlightTimeMin: 0, restMinSinceLastDuty: 12 * 60, status: 'active', source: 'mock' },
   // A330 crew
   { id: 'C003', name: 'Carter, J.',  role: 'CAP', base: 'JFK', typeRatings: ['A330'],         priorFdpMin: 0, priorFlightTimeMin: 0, restMinSinceLastDuty: 12 * 60, status: 'active', source: 'mock' },
