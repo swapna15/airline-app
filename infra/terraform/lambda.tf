@@ -54,7 +54,7 @@ resource "aws_iam_role_policy" "lambda_secrets" {
 
 # ── Common Lambda settings ────────────────────────────────────────────────────
 locals {
-  lambda_runtime = "nodejs20.x"
+  lambda_runtime = "nodejs22.x"   # latest GA in AWS Lambda; bumped from nodejs20.x
   lambda_timeout = 29  # Match API Gateway's max timeout
   lambda_memory  = 1024 # More memory = more CPU = faster cold starts
 

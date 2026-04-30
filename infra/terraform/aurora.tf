@@ -13,7 +13,7 @@ resource "aws_rds_cluster" "main" {
   cluster_identifier      = "${local.name}-aurora"
   engine                  = "aurora-postgresql"
   engine_mode             = "provisioned"
-  engine_version          = "15.8"
+  engine_version          = "17.4"   # latest GA major; bumped from 15.8 — see commit msg for breakage analysis
   database_name           = var.db_name
   master_username         = var.db_master_username
   manage_master_user_password = true   # Secrets Manager rotation managed by AWS
@@ -26,9 +26,11 @@ resource "aws_rds_cluster" "main" {
     max_capacity = 16
   }
 
-  storage_encrypted   = true
-  deletion_protection = var.environment == "prod"
-  skip_final_snapshot = var.environment != "prod"
+  storage_encrypted     = true
+  deletion_protection   = var.environment == "prod"
+  skip_final_snapshot   = var.environment != "prod"
+  apply_immediately     = var.environment != "prod"   # major-version upgrade triggers in-place restart
+  allow_major_version_upgrade = true
 
   tags = { Name = "${local.name}-aurora" }
 }
