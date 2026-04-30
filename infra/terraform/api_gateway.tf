@@ -121,6 +121,13 @@ resource "aws_api_gateway_resource" "flights_search" {
   path_part   = "search"
 }
 
+# /flights/own-today — list of today's airline-operated flights (canonical OwnFlight[])
+resource "aws_api_gateway_resource" "flights_own_today" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.flights.id
+  path_part   = "own-today"
+}
+
 resource "aws_api_gateway_resource" "flights_id" {
   rest_api_id = aws_api_gateway_rest_api.main.id
   parent_id   = aws_api_gateway_resource.flights.id
@@ -321,6 +328,7 @@ locals {
 
     # Flights — search is public; seat map requires auth
     "POST-flights-search"          = { method = "POST",   resource_id = aws_api_gateway_resource.flights_search.id,               lambda_arn = aws_lambda_function.flights.invoke_arn,  auth = false },
+    "GET-flights-own-today"        = { method = "GET",    resource_id = aws_api_gateway_resource.flights_own_today.id,            lambda_arn = aws_lambda_function.flights.invoke_arn,  auth = true  },
     "GET-flights-id"               = { method = "GET",    resource_id = aws_api_gateway_resource.flights_id.id,                   lambda_arn = aws_lambda_function.flights.invoke_arn,  auth = false },
     "GET-flights-id-seats"         = { method = "GET",    resource_id = aws_api_gateway_resource.flights_id_seats.id,             lambda_arn = aws_lambda_function.flights.invoke_arn,  auth = true  },
 

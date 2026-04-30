@@ -153,6 +153,64 @@ async function getSeatMap(
   return ok(grouped);
 }
 
+// ── GET /flights/own-today ────────────────────────────────────────────────────
+//
+// Returns the airline's own operating flights for today (the tenant's
+// schedule), shaped as canonical OwnFlight[] so the planner consumes them
+// without any client-side mapping. NOT a passenger-search endpoint —
+// returns every own flight regardless of seat availability.
+async function listOwnFlightsToday(tenantId: string): Promise<APIGatewayProxyResult> {
+  const rows = await query<{
+    id: string;
+    flight_number: string;
+    airline_code: string;
+    departure_time: string;
+    arrival_time: string;
+    origin_code: string;
+    destination_code: string;
+    aircraft: string | null;
+    pax_load: number | null;
+  }>(
+    `SELECT
+       f.id, f.flight_number, f.airline_code,
+       f.departure_time, f.arrival_time,
+       dep.code AS origin_code, arr.code AS destination_code,
+       f.aircraft,
+       (SELECT COUNT(*)::int FROM seats s
+        WHERE s.flight_id = f.id AND s.is_occupied = true) AS pax_load
+     FROM flights f
+     JOIN airports dep ON dep.code = f.origin_code
+     JOIN airports arr ON arr.code = f.destination_code
+     WHERE f.tenant_id = $1
+       AND f.status NOT IN ('cancelled')
+       AND DATE(f.departure_time AT TIME ZONE 'UTC') = CURRENT_DATE
+     ORDER BY f.departure_time`,
+    [tenantId],
+  );
+
+  // Strip the carrier prefix from flight_number if present (DB stores 'BA1000',
+  // canonical wants 'BA' + '1000' separately).
+  const flights = rows.map((r) => {
+    const raw = r.flight_number ?? '';
+    const carrier = r.airline_code;
+    const flightNumber = raw.startsWith(carrier) ? raw.slice(carrier.length) : raw;
+    return {
+      source: 'own' as const,
+      externalId: r.id,
+      carrier,
+      flightNumber,
+      origin: r.origin_code,
+      destination: r.destination_code,
+      scheduledDeparture: r.departure_time,
+      scheduledArrival:   r.arrival_time,
+      aircraftType: r.aircraft ?? undefined,
+      paxLoad: r.pax_load ?? 0,
+    };
+  });
+
+  return ok({ flights });
+}
+
 // ── Router ────────────────────────────────────────────────────────────────────
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   try {
@@ -172,6 +230,7 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
     if (!tenantId) return badRequest(`Unknown tenant: ${tenantSlug}`);
 
     if (method === 'POST' && path === '/flights/search') return searchFlights(event.body, tenantId);
+    if (method === 'GET'  && path === '/flights/own-today') return listOwnFlightsToday(tenantId);
     if (method === 'GET' && flightId && path.endsWith('/seats')) return getSeatMap(flightId, tenantId, cabinClass ?? undefined);
     if (method === 'GET' && flightId) return getFlight(flightId, tenantId);
 

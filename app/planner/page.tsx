@@ -7,7 +7,7 @@ import { PlannerTabs } from '@/components/PlannerTabs';
 import { AutoPrepareProgress, type AutoPrepareRun } from '@/components/AutoPrepareProgress';
 import { readNdjson } from '@/lib/ndjson';
 import type { OwnFlight } from '@shared/schema/flight';
-import { displayFlightNo, displayDepartureTime, todayAt } from '@/lib/flight-display';
+import { displayFlightNo, displayDepartureTime } from '@/lib/flight-display';
 
 type PhaseId =
   | 'brief'
@@ -40,15 +40,9 @@ interface FlightPlan {
   releasedBy?: string;
 }
 
-// Mock data conforms to the canonical OwnFlight schema. When this is replaced
-// by a fetch from the deployed flights table, the type stays the same and
-// nothing downstream changes.
-const MOCK_FLIGHTS: OwnFlight[] = [
-  { source: 'own', externalId: '1', carrier: 'BA', flightNumber: '1000', origin: 'JFK', destination: 'LHR', scheduledDeparture: todayAt('09:45'), scheduledArrival: todayAt('21:45'), aircraftIcao: 'B77W', aircraftType: 'Boeing 777-300ER', tail: 'G-XLEK', paxLoad: 287 },
-  { source: 'own', externalId: '2', carrier: 'AA', flightNumber: '2111', origin: 'JFK', destination: 'CDG', scheduledDeparture: todayAt('11:15'), scheduledArrival: todayAt('23:30'), aircraftIcao: 'A333', aircraftType: 'Airbus A330-300',  paxLoad: 244 },
-  { source: 'own', externalId: '3', carrier: 'LH', flightNumber: '4410', origin: 'JFK', destination: 'FRA', scheduledDeparture: todayAt('14:00'), scheduledArrival: todayAt('02:30'), aircraftIcao: 'A388', aircraftType: 'Airbus A380-800',  paxLoad: 489 },
-  { source: 'own', externalId: '4', carrier: 'EK', flightNumber: '5500', origin: 'JFK', destination: 'DXB', scheduledDeparture: todayAt('16:30'), scheduledArrival: todayAt('07:30'), aircraftIcao: 'A388', aircraftType: 'Airbus A380-800',  paxLoad: 502 },
-];
+// Real flights are fetched from /api/flights/own (which bridges to the
+// deployed flights Lambda when NEXT_PUBLIC_API_URL is set, else returns a
+// canonical-shape fallback for local dev). Loaded once on mount.
 
 const PHASES: { id: PhaseId; label: string; description: string }[] = [
   { id: 'brief',          label: 'Pre-flight Brief',     description: 'WX outlook, NOTAM digest, ops bulletins' },
@@ -73,7 +67,9 @@ export default function PlannerPage() {
   const { data: session } = useSession();
   const reviewerId = (session?.user as { email?: string })?.email ?? 'anonymous';
 
-  const [selectedId, setSelectedId] = useState<string>(MOCK_FLIGHTS[0].externalId);
+  const [flights, setFlights] = useState<OwnFlight[]>([]);
+  const [flightsLoading, setFlightsLoading] = useState(true);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [plan, setPlan] = useState<FlightPlan | null>(null);
   const [activeRejectPhase, setActiveRejectPhase] = useState<PhaseId | null>(null);
   const [rejectComment, setRejectComment] = useState('');
@@ -82,7 +78,24 @@ export default function PlannerPage() {
   const [autoBusy, setAutoBusy] = useState(false);
   const [persistError, setPersistError] = useState<string | null>(null);
 
-  const selected = MOCK_FLIGHTS.find((f) => f.externalId === selectedId)!;
+  // Load today's airline-owned flights once on mount.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/flights/own')
+      .then(async (r) => {
+        const j = (await r.json().catch(() => ({}))) as { flights?: OwnFlight[] };
+        return Array.isArray(j.flights) ? j.flights : [];
+      })
+      .then((fs) => {
+        if (cancelled) return;
+        setFlights(fs);
+        if (fs.length > 0) setSelectedId(fs[0].externalId);
+      })
+      .finally(() => { if (!cancelled) setFlightsLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
+
+  const selected = flights.find((f) => f.externalId === selectedId) ?? null;
   const phases = plan?.phases;
   const released = plan?.status === 'released';
 
@@ -115,6 +128,13 @@ export default function PlannerPage() {
   // response (auth error, 5xx, malformed body) falls back to a fresh empty
   // plan so the UI doesn't crash on `plan.phases[id]`.
   useEffect(() => {
+    if (!selectedId) {
+      setPlan(null);
+      setAutoRun(null);
+      setAutoBusy(false);
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     setAutoRun(null);
@@ -328,30 +348,46 @@ export default function PlannerPage() {
       {/* Flights to plan */}
       <aside className="col-span-4 space-y-3">
         <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Flights Needing Plan</h2>
-        {MOCK_FLIGHTS.map((f) => (
-          <button
-            key={f.externalId}
-            onClick={() => setSelectedId(f.externalId)}
-            className={`w-full text-left p-4 rounded-xl border transition-colors ${
-              f.externalId === selectedId
-                ? 'border-amber-300 bg-amber-50/40'
-                : 'border-gray-200 hover:bg-gray-50'
-            }`}
-          >
-            <div className="flex items-center justify-between mb-1">
-              <span className="font-semibold text-sm">{displayFlightNo(f)}</span>
-              <span className="text-xs text-gray-500 flex items-center gap-1">
-                <Clock size={11} /> {displayDepartureTime(f.scheduledDeparture)}
-              </span>
-            </div>
-            <p className="text-sm text-gray-600">{f.origin} → {f.destination}</p>
-            <p className="text-xs text-gray-400 mt-1">{f.aircraftType ?? f.aircraftIcao} · {f.paxLoad} pax</p>
-          </button>
-        ))}
+        {flightsLoading ? (
+          <div className="flex items-center gap-2 text-sm text-gray-500 py-4">
+            <Loader2 size={14} className="animate-spin" /> Loading flights…
+          </div>
+        ) : flights.length === 0 ? (
+          <p className="text-sm text-gray-500 py-4">
+            No own-airline flights scheduled for today.
+          </p>
+        ) : (
+          flights.map((f) => (
+            <button
+              key={f.externalId}
+              onClick={() => setSelectedId(f.externalId)}
+              className={`w-full text-left p-4 rounded-xl border transition-colors ${
+                f.externalId === selectedId
+                  ? 'border-amber-300 bg-amber-50/40'
+                  : 'border-gray-200 hover:bg-gray-50'
+              }`}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <span className="font-semibold text-sm">{displayFlightNo(f)}</span>
+                <span className="text-xs text-gray-500 flex items-center gap-1">
+                  <Clock size={11} /> {displayDepartureTime(f.scheduledDeparture)}
+                </span>
+              </div>
+              <p className="text-sm text-gray-600">{f.origin} → {f.destination}</p>
+              <p className="text-xs text-gray-400 mt-1">{f.aircraftType ?? f.aircraftIcao} · {f.paxLoad ?? 0} pax</p>
+            </button>
+          ))
+        )}
       </aside>
 
       {/* Workflow stepper */}
       <section className="col-span-8 space-y-4">
+        {!selected ? (
+          <div className="text-sm text-gray-500 py-8 text-center">
+            {flightsLoading ? 'Loading…' : 'Select a flight from the list to start planning.'}
+          </div>
+        ) : (
+        <>
         <header className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">{displayFlightNo(selected)}</h1>
@@ -528,6 +564,8 @@ export default function PlannerPage() {
               );
             })}
           </ol>
+        )}
+        </>
         )}
       </section>
       </div>

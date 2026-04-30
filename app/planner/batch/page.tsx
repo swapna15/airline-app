@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Zap, Loader2, Clock, ArrowRight } from 'lucide-react';
 import { PlannerTabs } from '@/components/PlannerTabs';
@@ -10,20 +10,8 @@ import type { OwnFlight } from '@shared/schema/flight';
 import {
   displayFlightNo,
   displayDepartureTime,
-  todayAt,
   minutesUntilDeparture,
 } from '@/lib/flight-display';
-
-// Mock day's rotation, conformant to the canonical OwnFlight schema.
-// Replace with /api/planner/eod or a fleet feed when ready.
-const TODAY: OwnFlight[] = [
-  { source: 'own', externalId: '1', carrier: 'BA', flightNumber: '1000', origin: 'JFK', destination: 'LHR', scheduledDeparture: todayAt('09:45'), scheduledArrival: todayAt('21:45'), aircraftIcao: 'B77W', aircraftType: 'Boeing 777-300ER', paxLoad: 287 },
-  { source: 'own', externalId: '2', carrier: 'AA', flightNumber: '2111', origin: 'JFK', destination: 'CDG', scheduledDeparture: todayAt('11:15'), scheduledArrival: todayAt('23:30'), aircraftIcao: 'A333', aircraftType: 'Airbus A330-300',  paxLoad: 244 },
-  { source: 'own', externalId: '3', carrier: 'LH', flightNumber: '4410', origin: 'JFK', destination: 'FRA', scheduledDeparture: todayAt('14:00'), scheduledArrival: todayAt('02:30'), aircraftIcao: 'A388', aircraftType: 'Airbus A380-800',  paxLoad: 489 },
-  { source: 'own', externalId: '4', carrier: 'EK', flightNumber: '5500', origin: 'JFK', destination: 'DXB', scheduledDeparture: todayAt('16:30'), scheduledArrival: todayAt('07:30'), aircraftIcao: 'A388', aircraftType: 'Airbus A380-800',  paxLoad: 502 },
-  { source: 'own', externalId: '5', carrier: 'AF', flightNumber: '7700', origin: 'BOS', destination: 'CDG', scheduledDeparture: todayAt('19:50'), scheduledArrival: todayAt('07:50'), aircraftIcao: 'A359', aircraftType: 'Airbus A350-900',  paxLoad: 312 },
-  { source: 'own', externalId: '6', carrier: 'KL', flightNumber: '6612', origin: 'BOS', destination: 'AMS', scheduledDeparture: todayAt('21:10'), scheduledArrival: todayAt('09:10'), aircraftIcao: 'B789', aircraftType: 'Boeing 787-9',     paxLoad: 296 },
-];
 
 type Window = 'next2h' | 'next4h' | 'today';
 
@@ -66,21 +54,40 @@ function FlightProgressRow({ flight, run }: { flight: OwnFlight; run: AutoPrepar
 }
 
 export default function PlannerBatchPage() {
+  const [today, setToday] = useState<OwnFlight[]>([]);
+  const [todayLoading, setTodayLoading] = useState(true);
   const [windowSel, setWindowSel] = useState<Window>('next4h');
   const [runsByFlight, setRunsByFlight] = useState<Record<string, AutoPrepareRun>>({});
   const [busy, setBusy] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set(TODAY.map((f) => f.externalId)));
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Load today's airline-owned rotation from /api/flights/own.
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/flights/own')
+      .then(async (r) => {
+        const j = (await r.json().catch(() => ({}))) as { flights?: OwnFlight[] };
+        return Array.isArray(j.flights) ? j.flights : [];
+      })
+      .then((fs) => {
+        if (cancelled) return;
+        setToday(fs);
+        setSelected(new Set(fs.map((f) => f.externalId)));
+      })
+      .finally(() => { if (!cancelled) setTodayLoading(false); });
+    return () => { cancelled = true; };
+  }, []);
 
   const filtered = useMemo(() => {
     const win = WINDOWS.find((w) => w.id === windowSel)!;
-    return TODAY
+    return today
       .filter((f) => {
         if (win.minutes === null) return true;
         const m = minutesUntilDeparture(f);
         return m >= -30 && m <= win.minutes; // include flights up to 30 min in the past
       })
       .sort((a, b) => a.scheduledDeparture.localeCompare(b.scheduledDeparture));
-  }, [windowSel]);
+  }, [windowSel, today]);
 
   const toggle = (id: string) => {
     const next = new Set(selected);
@@ -166,7 +173,11 @@ export default function PlannerBatchPage() {
         </div>
       </div>
 
-      {filtered.length === 0 ? (
+      {todayLoading ? (
+        <div className="flex items-center justify-center gap-2 text-sm text-gray-500 py-12">
+          <Loader2 size={14} className="animate-spin" /> Loading today&apos;s rotation…
+        </div>
+      ) : filtered.length === 0 ? (
         <p className="text-sm text-gray-500 py-12 text-center">No flights in the selected window.</p>
       ) : (
         <div className="space-y-4">
