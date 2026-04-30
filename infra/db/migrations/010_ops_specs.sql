@@ -34,7 +34,7 @@ CREATE TABLE ops_specs (
   etops_approval       JSONB        NOT NULL DEFAULT '{}'::jsonb,
 
   /* ── B036/C063 PBN authorizations ─────────────────────────────────────── */
-  /* { rnavLevels: ['RNAV-1','RNAV-2','RNAV-5'], rnpLevels: ['RNP-2','RNP-AR'] } */
+  /* { rnavLevels: ['RNAV-1','RNAV-2','RNAV-5'], rnpLevels: ['RNP-2','RNP-4','RNP-10','RNP-AR'] } */
   pbn_authorizations   JSONB        NOT NULL DEFAULT '{}'::jsonb,
 
   /* ── Cost index (per type, falling back to default) ───────────────────── */
@@ -76,7 +76,7 @@ SELECT
    }'::jsonb,
   '{
      "rnavLevels": ["RNAV-1","RNAV-2","RNAV-5"],
-     "rnpLevels":  ["RNP-2","RNP-AR"]
+     "rnpLevels":  ["RNP-2","RNP-4","RNP-10","RNP-AR"]
    }'::jsonb,
   '{ "default": 30, "byType": {} }'::jsonb
 FROM tenants t

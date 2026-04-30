@@ -19,6 +19,7 @@ import type { OwnFlight } from '@shared/schema/flight';
 import { getRoster, getAssignments, assignmentsForFlight } from '@/lib/crew';
 import { scoreCrewBatch, REJECT_FATIGUE_THRESHOLD, HIGH_FATIGUE_THRESHOLD } from '@/lib/crew-fatigue';
 import { loadOpsSpecs } from '@/lib/ops-specs';
+import { derivePbnRequirements, validatePbn } from '@/lib/pbn';
 import {
   equidistantPoint, findEtopsAlternates, effectiveEtopsBound,
   computeCriticalFuel, checkAlternateWeather,
@@ -151,10 +152,20 @@ export async function route(f: OwnFlight, authToken: string | null): Promise<Pha
   const typeKey = f.aircraftIcao ?? aircraftLabel(f);
   const ci = ops.costIndex.byType[typeKey] ?? ops.costIndex.default;
 
+  // PBN authorization check (OpsSpec C063 / B036): derive the RNAV/RNP
+  // levels this route requires and compare against the operator's
+  // authorized list. Missing any → dispatch reject.
+  const pbnRequired = derivePbnRequirements(o, d);
+  const pbnCheck    = validatePbn(pbnRequired, ops.pbnAuthorizations);
+
+  const pbnLine = pbnCheck.ok
+    ? `PBN: ${[...pbnRequired.rnav, ...pbnRequired.rnp].join(', ')} all authorized.`
+    : `⛔ PBN: route requires ${pbnCheck.missing.join(', ')} — operator NOT authorized.`;
+
   const summary =
     `Great-circle ${o.iata}→${d.iata}: ${fe.distanceNM} nm, initial heading ${String(bearing).padStart(3, '0')}°. ` +
     `Block time ${Math.floor(fe.blockTimeMin / 60)}h ${fe.blockTimeMin % 60}m at M${(fe.cruiseSpeedKt / 573).toFixed(2)} ` +
-    `(CI ${ci}). Direct routing shown — airway selection pending AIRAC integration.`;
+    `(CI ${ci}). ${pbnLine} Direct routing shown — airway selection pending AIRAC integration.`;
 
   return {
     summary,
@@ -166,6 +177,10 @@ export async function route(f: OwnFlight, authToken: string | null): Promise<Pha
       cruiseSpeedKt: fe.cruiseSpeedKt,
       costIndex: ci,
       costIndexSource: ops.costIndex.byType[typeKey] !== undefined ? `byType[${typeKey}]` : 'default',
+      pbnRequired,
+      pbnAuthorized: ops.pbnAuthorizations,
+      pbnMissing: pbnCheck.missing,
+      pbnOk: pbnCheck.ok,
     },
     source: 'haversine + perf-table + tenant ops-specs',
   };

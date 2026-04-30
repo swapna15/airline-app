@@ -79,7 +79,7 @@ export const DEFAULT_OPS_SPECS: OpsSpecs = {
   },
   pbnAuthorizations: {
     rnavLevels: ['RNAV-1', 'RNAV-2', 'RNAV-5'],
-    rnpLevels:  ['RNP-2', 'RNP-AR'],
+    rnpLevels:  ['RNP-2', 'RNP-4', 'RNP-10', 'RNP-AR'],
   },
   costIndex: { default: 30, byType: {} },
   authorizedAirports: [],
