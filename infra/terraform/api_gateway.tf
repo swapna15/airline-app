@@ -404,6 +404,12 @@ resource "aws_api_gateway_stage" "main" {
   rest_api_id   = aws_api_gateway_rest_api.main.id
   stage_name    = var.environment
 
+  # The account-level CloudWatch role must exist BEFORE API Gateway will let
+  # us enable access logging on a stage — without depends_on, Terraform tries
+  # to update the stage in parallel with the account setting and AWS rejects
+  # with "CloudWatch Logs role ARN must be set in account settings".
+  depends_on = [aws_api_gateway_account.main]
+
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.apigw_access.arn
     # JSON-formatted access log — every request shows up with status, latency,
