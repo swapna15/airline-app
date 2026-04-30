@@ -152,8 +152,18 @@ async function upsertPlan(
 
   let releasedSet = '';
   if (data.status === 'released') {
-    releasedSet = `, released_at = COALESCE($${i}, NOW()), released_by = $${i + 1}`;
-    params.push(data.releasedAt ?? null, data.releasedBy ?? reviewerId);
+    // released_by is a UUID FK to users(id). NEVER trust data.releasedBy from
+    // the body — historically clients sent the user's email there, which made
+    // Postgres throw "invalid input syntax for type uuid". Always use the
+    // authorizer's userId (the JWT `sub` claim, which is the user UUID).
+    // If the authorizer somehow gave us a non-UUID, fail fast with a clear
+    // error rather than letting Postgres surface a cryptic 22P02.
+    const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!UUID_RE.test(reviewerId)) {
+      return badRequest(`cannot release: authorizer userId is not a UUID (got "${reviewerId}"). The JWT's "sub" claim should be the user's DB UUID.`);
+    }
+    releasedSet = `, released_at = COALESCE($${i}, NOW()), released_by = $${i + 1}::uuid`;
+    params.push(data.releasedAt ?? null, reviewerId);
     i += 2;
   }
 
