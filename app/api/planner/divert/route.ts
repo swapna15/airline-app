@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { lookupAirport, type AirportRef } from '@/lib/icao';
 import { findCandidatesWithin, greatCircleNM } from '@/lib/perf';
-import { fetchMetars } from '@/lib/aviationweather';
+import { fetchMetars, parseMetarMinima } from '@/lib/aviationweather';
 import type { MetarReport } from '@/lib/aviationweather';
+import { loadOpsSpecs, type AlternateMinima } from '@/lib/ops-specs';
 
 type DivertReason = 'medical' | 'mechanical' | 'weather' | 'fuel';
 
@@ -20,11 +21,15 @@ interface AlternateScore {
   distanceFromDestNM: number;
   fltCat?: MetarReport['fltCat'];
   metar?: string;
+  ceilingFt: number | null;
+  visSm: number | null;
+  meetsAlternateMinima: 'yes' | 'no' | 'unknown';
   runwayAdequate: boolean;
   customs: boolean;
   fuel: boolean;
   fireCatOk: boolean;
   etopsAlternate: boolean;
+  authorized: boolean;
   score: number;
   notes: string[];
 }
@@ -48,6 +53,8 @@ function scoreFor(
   alt: {
     distance: number; runway: boolean; customs: boolean; fuel: boolean;
     fireCatOk: boolean; isVfr: boolean; etopsAlternate: boolean;
+    meetsAlternateMinima: 'yes' | 'no' | 'unknown';
+    authorized: boolean;
   },
 ): number {
   // Distance penalty: 1 point per 100 nm
@@ -57,6 +64,8 @@ function scoreFor(
   if (!alt.runway) s -= 80;
   if (!alt.fireCatOk) s -= 50;
   if (etopsRequired && !alt.etopsAlternate) s -= 70; // ETOPS dispatch needs an adequate alternate
+  if (alt.meetsAlternateMinima === 'no') s -= 90;    // OpsSpec C055 ceiling/vis floor
+  if (!alt.authorized) s -= 100;                     // OpsSpec authorized-airports list
 
   // Reason-specific bonuses
   if (reason === 'medical' && alt.customs) s += 10;
@@ -67,6 +76,25 @@ function scoreFor(
   if (alt.etopsAlternate) s += 5; // mild positive even when ETOPS not strictly required
 
   return Math.round(s);
+}
+
+/**
+ * Compare a parsed METAR against the OpsSpec alternate-minima floor.
+ * Returns 'unknown' when we lack ceiling or vis data — the planner sees the
+ * gap rather than a false 'yes'.
+ *
+ * Real dispatch uses TAF at ETA ±1hr; this is a current-conditions proxy.
+ */
+function checkAlternateMinima(
+  ceilingFt: number | null,
+  visSm: number | null,
+  minima: AlternateMinima,
+): 'yes' | 'no' | 'unknown' {
+  if (visSm === null) return 'unknown';
+  if (visSm < minima.alternateVisSm) return 'no';
+  // ceiling=null means no BKN/OVC reported → unlimited ceiling → meets minima
+  if (ceilingFt !== null && ceilingFt < minima.alternateCeilingFt) return 'no';
+  return 'yes';
 }
 
 /**
@@ -91,6 +119,14 @@ export async function POST(req: NextRequest) {
   if (!dest || !origin) {
     return NextResponse.json({ error: 'unknown origin or destination' }, { status: 400 });
   }
+
+  // Pull the tenant OpsSpec — alternateMinima for ceiling/vis floor, and
+  // authorizedAirports for the operator's permitted-stations filter.
+  const auth = req.headers.get('authorization');
+  const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+  const opsSpecs = await loadOpsSpecs(token);
+  const authorizedSet = new Set(opsSpecs.authorizedAirports.map((s) => s.toUpperCase()));
+  const hasAuthList = authorizedSet.size > 0;
 
   const required = requiredRunwayFt(body.aircraft);
   const distanceOriginToDestNM = greatCircleNM(origin, dest);
@@ -123,6 +159,16 @@ export async function POST(req: NextRequest) {
     const runwayAdequate = a.runwayLengthFt >= required;
     const fireCatOk      = a.fireCat >= 9;
     const isVfr          = metar?.fltCat === 'VFR';
+    const authorized     = !hasAuthList
+      || authorizedSet.has(a.icao.toUpperCase())
+      || authorizedSet.has(a.iata.toUpperCase());
+
+    const minima = metar
+      ? parseMetarMinima(metar)
+      : { ceilingFt: null, visSm: null };
+    const meetsAlternateMinima: 'yes' | 'no' | 'unknown' = metar
+      ? checkAlternateMinima(minima.ceilingFt, minima.visSm, opsSpecs.alternateMinima)
+      : 'unknown';
 
     const score = scoreFor(body.reason, etopsRequired, {
       distance: distFromDest,
@@ -132,15 +178,29 @@ export async function POST(req: NextRequest) {
       fireCatOk,
       isVfr,
       etopsAlternate: a.etopsAlternate,
+      meetsAlternateMinima,
+      authorized,
     });
 
     const notes: string[] = [];
     if (!runwayAdequate) notes.push(`runway ${a.runwayLengthFt.toLocaleString()} ft < ${required.toLocaleString()} ft required`);
     if (!fireCatOk) notes.push(`RFF cat ${a.fireCat} below 9`);
     if (etopsRequired && !a.etopsAlternate) notes.push('not ETOPS-adequate (lighting/runway/customs)');
+    if (!authorized) notes.push('not in OpsSpec authorized-airports list');
+    if (meetsAlternateMinima === 'no') {
+      const ceilStr = minima.ceilingFt !== null ? `${minima.ceilingFt} ft` : 'unlimited';
+      const visStr  = minima.visSm !== null ? `${minima.visSm} SM` : '?';
+      notes.push(
+        `WX ${ceilStr} / ${visStr} below alt minima ${opsSpecs.alternateMinima.alternateCeilingFt} ft / ${opsSpecs.alternateMinima.alternateVisSm} SM`,
+      );
+    } else if (meetsAlternateMinima === 'unknown' && !metar) {
+      notes.push('no METAR — alternate minima unverified');
+    }
     if (!a.customs && body.reason === 'medical') notes.push('no 24h customs — pax handling delays likely');
     if (a.fuel === 'none') notes.push('no fuel uplift available');
-    if (metar?.fltCat && metar.fltCat !== 'VFR') notes.push(`current WX ${metar.fltCat}`);
+    if (metar?.fltCat && metar.fltCat !== 'VFR' && meetsAlternateMinima !== 'no') {
+      notes.push(`current WX ${metar.fltCat}`);
+    }
 
     return {
       airport: a,
@@ -148,11 +208,15 @@ export async function POST(req: NextRequest) {
       distanceFromDestNM:   Math.round(distFromDest),
       fltCat:               metar?.fltCat,
       metar:                metar?.rawOb,
+      ceilingFt:            minima.ceilingFt,
+      visSm:                minima.visSm,
+      meetsAlternateMinima,
       runwayAdequate,
       customs:              a.customs,
       fuel:                 a.fuel !== 'none',
       fireCatOk,
       etopsAlternate:       a.etopsAlternate,
+      authorized,
       score,
       notes,
     };
@@ -163,7 +227,15 @@ export async function POST(req: NextRequest) {
   // Top 15 surfaced to the UI — beyond that the list stops being useful.
   const ranked = scored.slice(0, 15);
 
-  const etopsAdequateCount = nearby.filter((a) => a.etopsAlternate).length;
+  const etopsAdequateCount    = nearby.filter((a) => a.etopsAlternate).length;
+  const meetsMinimaCount      = scored.filter((s) => s.meetsAlternateMinima === 'yes').length;
+  const authorizedRankedCount = scored.filter((s) => s.authorized).length;
+
+  // Surface a destination-authorization warning when the operator has an
+  // authorized-airports list and the filed destination isn't on it.
+  const destAuthorized = !hasAuthList
+    || authorizedSet.has(dest.icao.toUpperCase())
+    || authorizedSet.has(dest.iata.toUpperCase());
 
   return NextResponse.json({
     flight: body.flight,
@@ -172,9 +244,14 @@ export async function POST(req: NextRequest) {
     etopsRequired,
     candidatePoolSize: nearby.length,
     etopsAdequateCount,
+    meetsMinimaCount,
+    authorizedRankedCount,
+    destAuthorized,
+    alternateMinima: opsSpecs.alternateMinima,
+    authorizedAirportsCount: authorizedSet.size,
     ranked,
     source: metars.length
-      ? `aviationweather:metar + ourairports (${nearby.length} in 1000nm; ${etopsAdequateCount} ETOPS-adequate)`
+      ? `aviationweather:metar + ourairports (${nearby.length} in 1000nm; ${etopsAdequateCount} ETOPS-adequate; ${meetsMinimaCount} meet alt minima)`
       : `ourairports (${nearby.length} in 1000nm; ${etopsAdequateCount} ETOPS-adequate; no live WX)`,
   });
 }

@@ -34,11 +34,15 @@ interface Alternate {
   distanceFromDestNM: number;
   fltCat?: 'VFR' | 'MVFR' | 'IFR' | 'LIFR';
   metar?: string;
+  ceilingFt: number | null;
+  visSm: number | null;
+  meetsAlternateMinima: 'yes' | 'no' | 'unknown';
   runwayAdequate: boolean;
   customs: boolean;
   fuel: boolean;
   fireCatOk: boolean;
   etopsAlternate: boolean;
+  authorized: boolean;
   score: number;
   notes: string[];
 }
@@ -50,6 +54,11 @@ interface DivertResponse {
   etopsRequired: boolean;
   candidatePoolSize: number;
   etopsAdequateCount: number;
+  meetsMinimaCount: number;
+  authorizedRankedCount: number;
+  destAuthorized: boolean;
+  alternateMinima: { alternateCeilingFt: number; alternateVisSm: number };
+  authorizedAirportsCount: number;
   ranked: Alternate[];
   source: string;
 }
@@ -155,8 +164,25 @@ export default function DivertPage() {
                 ETOPS required · {result.etopsAdequateCount}/{result.candidatePoolSize} adequate in pool
               </span>
             )}
+            <span className="ml-2 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-medium">
+              alt minima ≥{result.alternateMinima.alternateCeilingFt} ft / ≥{result.alternateMinima.alternateVisSm} SM · {result.meetsMinimaCount} pass
+            </span>
+            {result.authorizedAirportsCount > 0 && (
+              <span className="ml-2 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">
+                authorized list: {result.authorizedAirportsCount} stations · {result.authorizedRankedCount} match
+              </span>
+            )}
             <span className="ml-2">· source: {result.source}</span>
           </p>
+          {!result.destAuthorized && (
+            <div className="mb-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 flex items-start gap-2">
+              <AlertOctagon size={14} className="mt-0.5 shrink-0" />
+              <span>
+                Filed destination is not in the OpsSpec authorized-airports list — request a station authorization
+                amendment before dispatch.
+              </span>
+            </div>
+          )}
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs text-gray-500">
               {visibleAlternates.length}/{result.ranked.length} alternates

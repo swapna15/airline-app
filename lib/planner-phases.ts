@@ -132,7 +132,7 @@ export async function brief(f: OwnFlight, authToken: string | null): Promise<Pha
   };
 }
 
-export function route(f: OwnFlight): PhaseResult {
+export async function route(f: OwnFlight, authToken: string | null): Promise<PhaseResult> {
   const o = lookupAirport(f.origin);
   const d = lookupAirport(f.destination);
   if (!o || !d) {
@@ -142,15 +142,32 @@ export function route(f: OwnFlight): PhaseResult {
   const fe = fuelEstimate(o, d, aircraftLabel(f));
   const bearing = Math.round(initialBearing(o, d));
   const filed = `${o.icao} DCT ${d.icao}`;
+
+  // Cost-index drives the speed schedule the FMS computes against fuel-vs-time
+  // tradeoff. Per-type override wins, falling back to the OpsSpec default.
+  // Real planning consumes CI to bias the route optimizer; we surface it on
+  // the OFP so dispatch and crew see the same number.
+  const ops = await loadOpsSpecs(authToken);
+  const typeKey = f.aircraftIcao ?? aircraftLabel(f);
+  const ci = ops.costIndex.byType[typeKey] ?? ops.costIndex.default;
+
   const summary =
     `Great-circle ${o.iata}→${d.iata}: ${fe.distanceNM} nm, initial heading ${String(bearing).padStart(3, '0')}°. ` +
-    `Block time ${Math.floor(fe.blockTimeMin / 60)}h ${fe.blockTimeMin % 60}m at M${(fe.cruiseSpeedKt / 573).toFixed(2)}. ` +
-    `Direct routing shown — airway selection pending AIRAC integration.`;
+    `Block time ${Math.floor(fe.blockTimeMin / 60)}h ${fe.blockTimeMin % 60}m at M${(fe.cruiseSpeedKt / 573).toFixed(2)} ` +
+    `(CI ${ci}). Direct routing shown — airway selection pending AIRAC integration.`;
 
   return {
     summary,
-    data: { filedRoute: filed, distanceNM: fe.distanceNM, initialBearing: bearing, blockTimeMin: fe.blockTimeMin, cruiseSpeedKt: fe.cruiseSpeedKt },
-    source: 'haversine + perf-table',
+    data: {
+      filedRoute: filed,
+      distanceNM: fe.distanceNM,
+      initialBearing: bearing,
+      blockTimeMin: fe.blockTimeMin,
+      cruiseSpeedKt: fe.cruiseSpeedKt,
+      costIndex: ci,
+      costIndexSource: ops.costIndex.byType[typeKey] !== undefined ? `byType[${typeKey}]` : 'default',
+    },
+    source: 'haversine + perf-table + tenant ops-specs',
   };
 }
 
@@ -367,7 +384,7 @@ export function slotAtc(f: OwnFlight): PhaseResult {
 export async function runPhase(id: PhaseId, f: OwnFlight, authToken: string | null): Promise<PhaseResult> {
   switch (id) {
     case 'brief':          return brief(f, authToken);
-    case 'route':          return route(f);
+    case 'route':          return route(f, authToken);
     case 'fuel':           return fuel(f, authToken);
     case 'aircraft':       return aircraft(f, authToken);
     case 'weight_balance': return weightBalance(f);
