@@ -85,6 +85,7 @@ export default function PlannerPage() {
   const [loading, setLoading] = useState(false);
   const [autoRun, setAutoRun] = useState<AutoPrepareRun | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
+  const [persistError, setPersistError] = useState<string | null>(null);
 
   const selected = MOCK_FLIGHTS.find((f) => f.id === selectedId)!;
   const phases = plan?.phases;
@@ -133,6 +134,17 @@ export default function PlannerPage() {
     return () => { cancelled = true; };
   }, [selectedId, normalizePlan]);
 
+  const surfaceError = useCallback(async (res: Response, action: string) => {
+    let msg: string;
+    try {
+      const body = await res.json();
+      msg = body?.error || body?.message || `HTTP ${res.status}`;
+    } catch {
+      msg = `HTTP ${res.status}`;
+    }
+    setPersistError(`${action} failed: ${msg} (status ${res.status})`);
+  }, []);
+
   const persistPhase = useCallback(async (id: PhaseId, next: PhaseState) => {
     if (!plan) return;
     const updated: FlightPlan = { ...plan, phases: { ...plan.phases, [id]: next } };
@@ -143,9 +155,12 @@ export default function PlannerPage() {
       body: JSON.stringify({ phases: { [id]: next } }),
     });
     if (res.ok) {
+      setPersistError(null);
       try { setPlan(normalizePlan(await res.json())); } catch { /* keep optimistic */ }
+    } else {
+      await surfaceError(res, 'Save phase');
     }
-  }, [plan, selectedId, normalizePlan]);
+  }, [plan, selectedId, normalizePlan, surfaceError]);
 
   const persistManyPhases = useCallback(async (updates: Partial<PhasesMap>) => {
     if (!plan) return;
@@ -162,9 +177,12 @@ export default function PlannerPage() {
       body: JSON.stringify({ phases: updates }),
     });
     if (res.ok) {
+      setPersistError(null);
       try { setPlan(normalizePlan(await res.json())); } catch { /* keep optimistic */ }
+    } else {
+      await surfaceError(res, 'Save plan');
     }
-  }, [plan, selectedId, normalizePlan]);
+  }, [plan, selectedId, normalizePlan, surfaceError]);
 
   // Fold completed phases into the plan as `ready` so the planner can
   // approve/reject them through the existing per-phase UI.
@@ -382,6 +400,25 @@ export default function PlannerPage() {
             </div>
           )}
         </header>
+
+        {persistError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-700 flex items-start gap-2">
+            <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+            <div className="flex-1">
+              <p className="font-medium">Save not persisted to the deployed Postgres.</p>
+              <p className="text-xs mt-1 font-mono">{persistError}</p>
+              <p className="text-xs mt-1 text-red-600">
+                Common cause: signed in with a role that lacks <code>flight_planner</code>/<code>admin</code>.
+                Check your role badge in the top nav. If 403, sign in as <code>admin@airline.com</code> /
+                <code>password</code> or <code>planner@airline.com</code> / <code>password</code>.
+                If 401, your <code>NEXTAUTH_SECRET</code> doesn&apos;t match the deployed Lambda&apos;s.
+              </p>
+            </div>
+            <button onClick={() => setPersistError(null)} className="text-red-600 hover:text-red-800 text-xs">
+              dismiss
+            </button>
+          </div>
+        )}
 
         {autoRun && <AutoPrepareProgress run={autoRun} />}
 
