@@ -3,7 +3,7 @@
 import Link from 'next/link';
 import { useSession, signOut } from 'next-auth/react';
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, Check } from 'lucide-react';
+import { ChevronDown, Check, BookOpen } from 'lucide-react';
 import type { UserRole } from '@/types/roles';
 import { ROLE_LABELS } from '@/types/roles';
 import { useTenant } from '@/core/tenant/context';
@@ -115,6 +115,14 @@ export function Navbar() {
             Find Booking
           </Link>
         )}
+        <Link
+          href="/docs/gaas"
+          className="flex items-center gap-1 hover:text-gray-900 transition-colors"
+          title="GAAS Reference — architecture, features, configuration"
+        >
+          <BookOpen size={14} />
+          Docs
+        </Link>
       </div>
 
       {/* Right side */}

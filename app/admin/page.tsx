@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Users, Plane, DollarSign, TrendingUp, Settings, ChevronDown, Loader2, Building2, Save, Check, ServerCog, ArrowRight, IdCard, FileText, Brain } from 'lucide-react';
+import { Users, Plane, DollarSign, TrendingUp, Settings, ChevronDown, Loader2, Building2, Save, Check, ServerCog, ArrowRight, IdCard, FileText, Brain, BookOpen } from 'lucide-react';
 import type { UserRole } from '@/types/roles';
 import { ROLE_LABELS } from '@/types/roles';
 import { AirlineLogo } from '@/components/AirlineLogo';
@@ -619,6 +619,24 @@ export default function AdminPage() {
                 <p className="text-xs text-gray-500 mt-0.5">
                   Per-tenant facts retrieved by the planning agents (RAG). Captures operator-specific
                   preferences, lessons learned, and policies the agents should know.
+                </p>
+              </div>
+            </Link>
+            <Link
+              href="/docs/gaas"
+              className="group flex items-start gap-3 p-4 rounded-xl border border-gray-200 hover:border-slate-400 hover:bg-slate-50 transition-colors"
+            >
+              <div className="w-10 h-10 rounded-lg bg-slate-100 text-slate-700 flex items-center justify-center shrink-0">
+                <BookOpen size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-sm text-gray-900">GAAS Reference</p>
+                  <ArrowRight size={14} className="text-gray-400 group-hover:text-slate-700 transition-colors" />
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Comprehensive single-doc reference: architecture diagrams, multi-tenancy, dispatch
+                  core, AI agents, installation, configuration, testing, and roadmap.
                 </p>
               </div>
             </Link>
