@@ -167,11 +167,23 @@ export default function DivertPage() {
             <span className="ml-2 px-1.5 py-0.5 rounded bg-blue-50 text-blue-700 font-medium">
               alt minima ≥{result.alternateMinima.alternateCeilingFt} ft / ≥{result.alternateMinima.alternateVisSm} SM · {result.meetsMinimaCount} pass
             </span>
-            {result.authorizedAirportsCount > 0 && (
-              <span className="ml-2 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 font-medium">
-                authorized list: {result.authorizedAirportsCount} stations · {result.authorizedRankedCount} match
-              </span>
-            )}
+            <span
+              className={`ml-2 px-1.5 py-0.5 rounded font-medium ${
+                result.authorizedAirportsCount > 0
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : 'bg-gray-100 text-gray-500'
+              }`}
+              title={
+                result.authorizedAirportsCount > 0
+                  ? 'OpsSpec authorized-airports list is set and filtering candidates'
+                  : 'OpsSpec authorized list empty — no restriction applied'
+              }
+            >
+              authorized list: {result.authorizedAirportsCount}
+              {result.authorizedAirportsCount > 0
+                ? ` stations · ${result.authorizedRankedCount} match`
+                : ' (no restriction)'}
+            </span>
             <span className="ml-2">· source: {result.source}</span>
           </p>
           {!result.destAuthorized && (
@@ -238,6 +250,36 @@ export default function DivertPage() {
                       >
                         {alt.airport.dataQuality === 'verified' ? '✓ verified' : 'heuristic'}
                       </span>
+                      {result.authorizedAirportsCount > 0 && (
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                            alt.authorized
+                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                              : 'bg-red-50 text-red-700 border border-red-200'
+                          }`}
+                          title={
+                            alt.authorized
+                              ? 'on OpsSpec authorized-airports list'
+                              : 'NOT on OpsSpec authorized-airports list — score –100'
+                          }
+                        >
+                          {alt.authorized ? '✓ authorized' : '✕ unauthorized'}
+                        </span>
+                      )}
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                          alt.meetsAlternateMinima === 'yes'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : alt.meetsAlternateMinima === 'no'
+                              ? 'bg-red-50 text-red-700 border border-red-200'
+                              : 'bg-gray-50 text-gray-500 border border-gray-200'
+                        }`}
+                        title={`Parsed METAR ceiling ${alt.ceilingFt ?? '—'} ft / vis ${alt.visSm ?? '—'} SM vs OpsSpec C055 floor`}
+                      >
+                        {alt.meetsAlternateMinima === 'yes' && '✓ alt min'}
+                        {alt.meetsAlternateMinima === 'no'  && '✕ below alt min'}
+                        {alt.meetsAlternateMinima === 'unknown' && '? alt min'}
+                      </span>
                     </div>
 
                     <div className="ml-8 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">
@@ -258,6 +300,11 @@ export default function DivertPage() {
                       <span className="flex items-center gap-1">
                         {alt.customs ? '🛂 customs' : '✕ no customs'}
                       </span>
+                      {(alt.ceilingFt !== null || alt.visSm !== null) && (
+                        <span className="flex items-center gap-1 text-gray-500">
+                          ceil {alt.ceilingFt !== null ? `${alt.ceilingFt} ft` : '∞'} · vis {alt.visSm !== null ? `${alt.visSm} SM` : '?'}
+                        </span>
+                      )}
                     </div>
 
                     {alt.metar && (
