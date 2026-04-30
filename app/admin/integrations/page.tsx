@@ -100,13 +100,23 @@ export default function IntegrationsPage() {
   const [rows, setRows] = useState<Row[]>([]);
   const [loading, setLoading] = useState(true);
   const [editing, setEditing] = useState<Kind | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const res = await fetch('/api/admin/integrations');
-      const data = await res.json();
-      setRows(data.integrations);
+      const data = await res.json().catch(() => ({} as { integrations?: Row[]; error?: string }));
+      if (!res.ok) {
+        setLoadError(data?.error || `HTTP ${res.status}`);
+        setRows([]);
+        return;
+      }
+      setRows(Array.isArray(data?.integrations) ? data.integrations : []);
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : String(err));
+      setRows([]);
     } finally {
       setLoading(false);
     }
@@ -136,6 +146,20 @@ export default function IntegrationsPage() {
           {loading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Reload
         </button>
       </header>
+
+      {loadError && (
+        <div className="mb-4 p-3 rounded-lg border border-red-200 bg-red-50 text-sm text-red-700 flex items-start gap-2">
+          <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+          <div>
+            <p className="font-medium">Failed to load integrations: {loadError}</p>
+            <p className="text-xs mt-1 text-red-600">
+              If you have <code>NEXT_PUBLIC_API_URL</code> set, this likely means your session has no
+              upstream JWT. Unset it to use the local in-memory store, or sign in via the deployed
+              backend.
+            </p>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-4">
         {rows.map((r) => (

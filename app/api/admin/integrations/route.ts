@@ -1,10 +1,30 @@
 import { NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/auth';
 import {
   ALL_KINDS, listIntegrationConfigs,
   type IntegrationKind, type IntegrationConfig,
 } from '@/lib/integrations/config-store';
 
 export const maxDuration = 30;
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
+async function authToken() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) return null;
+  return (session as { accessToken?: string }).accessToken;
+}
+
+interface LambdaIntegrationRow {
+  kind: IntegrationKind;
+  provider: string;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  lastHealth?: IntegrationConfig['lastHealth'];
+  updatedAt?: string;
+  updatedBy?: string;
+}
 
 /**
  * Lists the *effective* configuration for every integration kind.
@@ -79,12 +99,9 @@ function redact(v: string | undefined): string | undefined {
   return '••••••' + v.slice(-4);
 }
 
-export async function GET() {
-  const stored = listIntegrationConfigs();
-  const storedByKind = new Map(stored.map((c) => [c.kind, c]));
-
-  const rows: EffectiveRow[] = ALL_KINDS.map((k) => {
-    const s = storedByKind.get(k);
+function buildEffective(stored: Map<IntegrationKind, { kind: IntegrationKind; provider: string; config: Record<string, unknown>; enabled: boolean; lastHealth?: IntegrationConfig['lastHealth']; updatedAt?: string; updatedBy?: string }>): EffectiveRow[] {
+  return ALL_KINDS.map((k) => {
+    const s = stored.get(k);
     if (s && s.enabled) {
       return {
         kind: s.kind, source: 'store', provider: s.provider,
@@ -95,8 +112,34 @@ export async function GET() {
     }
     return envFallback(k);
   });
+}
 
-  return NextResponse.json({ integrations: rows });
+export async function GET() {
+  if (API_URL) {
+    const token = await authToken();
+    if (token) {
+      try {
+        const res = await fetch(`${API_URL}/admin/integrations`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const { integrations: lambdaRows = [] } = (await res.json()) as { integrations?: LambdaIntegrationRow[] };
+          const byKind = new Map(lambdaRows.map((r) => [r.kind, r]));
+          return NextResponse.json({ integrations: buildEffective(byKind) });
+        }
+        // Upstream returned a non-2xx — fall through to env-only listing so the UI
+        // still renders. The reason is surfaced via the 'env' source flag.
+      } catch {
+        // network error — same fallback
+      }
+    }
+    // No session token or upstream failed: show env defaults so the page never
+    // dead-ends. Saves require a working upstream and will surface the error then.
+    return NextResponse.json({ integrations: buildEffective(new Map()) });
+  }
+
+  const stored = new Map(listIntegrationConfigs().map((c) => [c.kind, c]));
+  return NextResponse.json({ integrations: buildEffective(stored) });
 }
 
 function redactConfig(c: Record<string, unknown>): Record<string, unknown> {

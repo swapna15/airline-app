@@ -21,7 +21,7 @@ const root     = path.resolve(__dirname, '..');
 const distRoot = path.join(root, 'dist');
 const nm       = path.join(root, 'node_modules');
 
-const handlers = ['authorizer', 'users', 'flights', 'bookings', 'checkin', 'gate', 'admin', 'migrate', 'planning'];
+const handlers = ['authorizer', 'users', 'flights', 'bookings', 'checkin', 'gate', 'admin', 'migrate', 'planning', 'integrations'];
 
 function copyDir(src, dest) {
   fs.mkdirSync(dest, { recursive: true });

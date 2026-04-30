@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/auth';
 import {
   ALL_KINDS, setIntegrationConfig, deleteIntegrationConfig,
   type IntegrationKind,
@@ -8,6 +10,14 @@ import { resetMelProvider }       from '@/lib/integrations/mel/resolver';
 import { resetCrewProvider }      from '@/lib/integrations/crew/resolver';
 
 export const maxDuration = 30;
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
+async function authToken() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) return null;
+  return (session as { accessToken?: string }).accessToken;
+}
 
 function isValidKind(s: string): s is IntegrationKind {
   return (ALL_KINDS as string[]).includes(s);
@@ -34,13 +44,25 @@ export async function PUT(req: NextRequest, { params }: { params: { kind: string
     return NextResponse.json({ error: 'provider and config are required' }, { status: 400 });
   }
 
+  if (API_URL) {
+    const token = await authToken();
+    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const res = await fetch(`${API_URL}/admin/integrations/${params.kind}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(body),
+    });
+    // Bust resolver cache so the next planner request picks up the change in this Next.js process.
+    resetCacheFor(params.kind);
+    return NextResponse.json(await res.json(), { status: res.status });
+  }
+
   const saved = setIntegrationConfig({
     kind:     params.kind,
     provider: body.provider,
     config:   body.config,
     enabled:  body.enabled ?? true,
   });
-  // Bust the cached resolver instance so the next request picks up the change.
   resetCacheFor(params.kind);
   return NextResponse.json(saved);
 }
@@ -49,6 +71,18 @@ export async function DELETE(_req: NextRequest, { params }: { params: { kind: st
   if (!isValidKind(params.kind)) {
     return NextResponse.json({ error: `unknown integration kind: ${params.kind}` }, { status: 400 });
   }
+
+  if (API_URL) {
+    const token = await authToken();
+    if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    const res = await fetch(`${API_URL}/admin/integrations/${params.kind}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    resetCacheFor(params.kind);
+    return NextResponse.json(await res.json(), { status: res.status });
+  }
+
   const removed = deleteIntegrationConfig(params.kind);
   resetCacheFor(params.kind);
   return NextResponse.json({ removed });

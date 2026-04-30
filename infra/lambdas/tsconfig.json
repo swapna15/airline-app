@@ -10,6 +10,6 @@
     "skipLibCheck": true,
     "resolveJsonModule": true
   },
-  "include": ["shared/**/*", "authorizer/**/*", "users/**/*", "flights/**/*", "bookings/**/*", "checkin/**/*", "gate/**/*", "admin/**/*", "migrate/**/*", "planning/**/*"],
+  "include": ["shared/**/*", "authorizer/**/*", "users/**/*", "flights/**/*", "bookings/**/*", "checkin/**/*", "gate/**/*", "admin/**/*", "migrate/**/*", "planning/**/*", "integrations/**/*"],
   "exclude": ["node_modules", "dist"]
 }

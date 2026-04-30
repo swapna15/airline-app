@@ -130,6 +130,12 @@ data "archive_file" "planning" {
   output_path = "/tmp/planning.zip"
 }
 
+data "archive_file" "integrations" {
+  type        = "zip"
+  source_dir  = "${var.lambda_dist_path}/integrations_pkg"
+  output_path = "/tmp/integrations.zip"
+}
+
 # ── Lambda: Authorizer (no VPC — only verifies JWT, no DB) ────────────────────
 resource "aws_lambda_function" "authorizer" {
   function_name    = "${local.name}-authorizer"
@@ -293,6 +299,27 @@ resource "aws_lambda_function" "planning" {
   }
 
   tags = { Name = "${local.name}-planning" }
+}
+
+# ── Lambda: Integrations (per-tenant data-source configuration) ──────────────
+resource "aws_lambda_function" "integrations" {
+  function_name    = "${local.name}-integrations"
+  role             = aws_iam_role.lambda.arn
+  runtime          = local.lambda_runtime
+  handler          = "integrations/handler.handler"
+  filename         = data.archive_file.integrations.output_path
+  source_code_hash = data.archive_file.integrations.output_base64sha256
+  timeout          = local.lambda_timeout
+  memory_size      = local.lambda_memory
+
+  environment { variables = local.lambda_env }
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_config.subnet_ids
+    security_group_ids = local.lambda_vpc_config.security_group_ids
+  }
+
+  tags = { Name = "${local.name}-integrations" }
 }
 
 # ── Lambda: Migrate (one-shot DB migration, invoked by CI after terraform apply) ─

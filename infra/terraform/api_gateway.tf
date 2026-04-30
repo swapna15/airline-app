@@ -56,6 +56,7 @@ resource "aws_iam_role_policy" "apigw_invoke_lambda" {
         aws_lambda_function.gate.arn,
         aws_lambda_function.admin.arn,
         aws_lambda_function.planning.arn,
+        aws_lambda_function.integrations.arn,
       ]
     }]
   })
@@ -238,6 +239,25 @@ resource "aws_api_gateway_resource" "admin_flights" {
   path_part   = "flights"
 }
 
+# /admin/integrations — per-tenant integration configs (DB-backed in phase 5)
+resource "aws_api_gateway_resource" "admin_integrations" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.admin.id
+  path_part   = "integrations"
+}
+
+resource "aws_api_gateway_resource" "admin_integrations_kind" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.admin_integrations.id
+  path_part   = "{kind}"
+}
+
+resource "aws_api_gateway_resource" "admin_integrations_kind_test" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.admin_integrations_kind.id
+  path_part   = "test"
+}
+
 # /planning
 resource "aws_api_gateway_resource" "planning" {
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -318,6 +338,12 @@ locals {
     "DELETE-admin-users-id"        = { method = "DELETE", resource_id = aws_api_gateway_resource.admin_users_id.id,               lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
     "GET-admin-flights"            = { method = "GET",    resource_id = aws_api_gateway_resource.admin_flights.id,                lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
 
+    # Admin integrations — admin only (enforced by handler)
+    "GET-admin-integrations"           = { method = "GET",    resource_id = aws_api_gateway_resource.admin_integrations.id,           lambda_arn = aws_lambda_function.integrations.invoke_arn, auth = true  },
+    "PUT-admin-integrations-kind"      = { method = "PUT",    resource_id = aws_api_gateway_resource.admin_integrations_kind.id,      lambda_arn = aws_lambda_function.integrations.invoke_arn, auth = true  },
+    "DELETE-admin-integrations-kind"   = { method = "DELETE", resource_id = aws_api_gateway_resource.admin_integrations_kind.id,      lambda_arn = aws_lambda_function.integrations.invoke_arn, auth = true  },
+    "POST-admin-integrations-kind-test" = { method = "POST",  resource_id = aws_api_gateway_resource.admin_integrations_kind_test.id, lambda_arn = aws_lambda_function.integrations.invoke_arn, auth = true  },
+
     # Planning — flight_planner / admin only (enforced by handler)
     "GET-planning-plan"            = { method = "GET",    resource_id = aws_api_gateway_resource.planning_flight_plans_id.id,         lambda_arn = aws_lambda_function.planning.invoke_arn, auth = true  },
     "PUT-planning-plan"            = { method = "PUT",    resource_id = aws_api_gateway_resource.planning_flight_plans_id.id,         lambda_arn = aws_lambda_function.planning.invoke_arn, auth = true  },
@@ -377,14 +403,15 @@ resource "aws_api_gateway_stage" "main" {
 # ── Lambda permissions for API Gateway ───────────────────────────────────────
 locals {
   lambda_permissions = {
-    users    = aws_lambda_function.users.function_name
-    flights  = aws_lambda_function.flights.function_name
-    bookings = aws_lambda_function.bookings.function_name
-    checkin  = aws_lambda_function.checkin.function_name
-    gate     = aws_lambda_function.gate.function_name
-    admin    = aws_lambda_function.admin.function_name
-    planning = aws_lambda_function.planning.function_name
-    authorizer = aws_lambda_function.authorizer.function_name
+    users        = aws_lambda_function.users.function_name
+    flights      = aws_lambda_function.flights.function_name
+    bookings     = aws_lambda_function.bookings.function_name
+    checkin      = aws_lambda_function.checkin.function_name
+    gate         = aws_lambda_function.gate.function_name
+    admin        = aws_lambda_function.admin.function_name
+    planning     = aws_lambda_function.planning.function_name
+    integrations = aws_lambda_function.integrations.function_name
+    authorizer   = aws_lambda_function.authorizer.function_name
   }
 }
 

@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { getServerSession } from 'next-auth';
+import { authOptions } from '@/auth';
 import { ALL_KINDS, setLastHealth, type IntegrationKind } from '@/lib/integrations/config-store';
 import { buildFuelPriceProvider } from '@/lib/integrations/fuelprices/resolver';
 import { buildMelProvider }       from '@/lib/integrations/mel/resolver';
@@ -6,6 +8,14 @@ import { buildCrewProvider }      from '@/lib/integrations/crew/resolver';
 import type { Provider } from '@/lib/integrations/types';
 
 export const maxDuration = 30;
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL;
+
+async function authToken() {
+  const session = await getServerSession(authOptions);
+  if (!session?.user) return null;
+  return (session as { accessToken?: string }).accessToken;
+}
 
 /**
  * Run a health check against an arbitrary provider configuration without
@@ -54,8 +64,22 @@ export async function POST(req: NextRequest, { params }: { params: { kind: strin
   }
 
   const result = await provider.healthCheck();
-  if (req.nextUrl.searchParams.get('save') === 'true' && result.ok) {
-    setLastHealth(params.kind, result);
+  const save = req.nextUrl.searchParams.get('save') === 'true';
+  if (save && result.ok) {
+    if (API_URL) {
+      // Persist lastHealth on the DB row via the integrations Lambda. The lambda
+      // does its own lightweight validation; we don't gate on its response.
+      const token = await authToken();
+      if (token) {
+        await fetch(`${API_URL}/admin/integrations/${params.kind}/test?save=true`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+          body: JSON.stringify({ provider: body.provider, config: body.config }),
+        }).catch(() => undefined);
+      }
+    } else {
+      setLastHealth(params.kind, result);
+    }
   }
   return NextResponse.json(result);
 }
