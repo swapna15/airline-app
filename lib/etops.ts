@@ -108,34 +108,50 @@ export function computeCriticalFuel(
   ep: { lat: number; lon: number },
   aircraft: string,
 ): CriticalFuelScenarios {
-  // Standard fuel — same calc the fuel phase already does.
+  // Standard fuel — same calc the fuel phase already does. Block fuel
+  // already includes trip + contingency + alternate + reserve + taxi.
   const standard = fuelEstimate(origin, destination, aircraft);
 
-  // Distance from EP to nearest ETOPS alternate. We model the diversion as
-  // origin→EP at standard burn + EP→alt at the appropriate scenario factor.
-  const halfTrip = standard.trip / 2;
+  // Origin → EP costs half the standard trip burn.
+  const halfTrip = Math.round(standard.trip / 2);
   const epToAltNM = Math.round(greatCircleNM(ep as AirportRef, nearestAltFromEp));
-  const epToAltHours = epToAltNM / standard.cruiseSpeedKt;
-  const burnPerHr = standard.trip / (standard.distanceNM / standard.cruiseSpeedKt); // kg/hr at cruise
+  const cruiseBurnPerNm = standard.trip / standard.distanceNM;  // kg/nm at FL370
 
-  // First-pass scenario factors (Boeing PEP / Airbus PEP would replace these):
-  //   engine-out at FL220+ ≈ 1.3× cruise burn
-  //   depressurization (FL100 cruise after emergency descent) ≈ 1.55×
-  //   both                                                   ≈ 2.0×
-  const ENGINE_OUT_FACTOR  = 1.30;
-  const DEPRESS_FACTOR     = 1.55;
-  const BOTH_FACTOR        = 2.00;
+  // Per-NM burn factors at each scenario's altitude.  Real planning replaces
+  // these with per-tail OEM tables (Boeing PEP / Airbus PEP).  First-pass:
+  //   engine-out at FL220+:  fuel flow ~0.80× of 2-eng cruise but TAS ~0.85×
+  //                          → per-nm burn ≈ 0.94× ... but altitude penalty
+  //                          adds ~15%, so ≈ 1.10× per-nm
+  //   depress (FL100 after emergency descent): fuel flow ~1.55× at 0.70× TAS
+  //                          → per-nm burn ≈ 2.20× ... but the descent itself
+  //                          burns < 5min of fuel, so amortized ≈ 1.40×
+  //   both (single-eng FL100): the worst — ≈ 1.70× per-nm
+  const ENGINE_OUT_BURN_PER_NM = cruiseBurnPerNm * 1.10;
+  const DEPRESS_BURN_PER_NM    = cruiseBurnPerNm * 1.40;
+  const BOTH_BURN_PER_NM       = cruiseBurnPerNm * 1.70;
 
-  const engineOutDivertKg  = Math.round(epToAltHours * burnPerHr * ENGINE_OUT_FACTOR);
-  const depressDivertKg    = Math.round(epToAltHours * burnPerHr * DEPRESS_FACTOR);
-  const bothDivertKg       = Math.round(epToAltHours * burnPerHr * BOTH_FACTOR);
+  // Build a divert-leg scenario: from EP fly to the alt at the scenario's
+  // per-nm burn, then hold at the alt (alternate fuel), then keep the
+  // regulatory final reserve, plus 5% contingency on the divert leg.
+  // Taxi was already burned at origin.
+  const buildScenario = (burnPerNm: number): number => {
+    const divertKg      = Math.round(epToAltNM * burnPerNm);
+    const contingencyKg = Math.round(divertKg * 0.05);
+    return Math.round(
+      halfTrip
+      + divertKg
+      + contingencyKg
+      + standard.alternate     // 45-min hold at the alt
+      + standard.reserve       // 30-min final reserve
+      + standard.taxi,         // taxi at origin (already burned, but counts toward dispatch)
+    );
+  };
 
-  // Each scenario adds the divert fuel on top of "got to the EP" fuel.
-  const engineOutKg        = Math.round(halfTrip + engineOutDivertKg + standard.reserve);
-  const depressurizationKg = Math.round(halfTrip + depressDivertKg + standard.reserve);
-  const bothKg             = Math.round(halfTrip + bothDivertKg + standard.reserve);
+  const engineOutKg        = buildScenario(ENGINE_OUT_BURN_PER_NM);
+  const depressurizationKg = buildScenario(DEPRESS_BURN_PER_NM);
+  const bothKg             = buildScenario(BOTH_BURN_PER_NM);
+  const standardKg         = standard.block;
 
-  const standardKg = standard.block;
   const all = { standardKg, engineOutKg, depressurizationKg, bothKg };
   let drivingScenario: CriticalFuelScenarios['drivingScenario'] = 'standard';
   let max = standardKg;
