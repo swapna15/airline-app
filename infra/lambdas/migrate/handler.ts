@@ -13,14 +13,16 @@ const MULTI_TENANT_SQL        = readFileSync(join(__dirname, '003_multi_tenant.s
 const FLIGHT_PLANS_SQL        = readFileSync(join(__dirname, '004_flight_plans.sql'),            'utf8');
 const INTEGRATION_CONFIGS_SQL = readFileSync(join(__dirname, '005_integration_configs.sql'),     'utf8');
 const FLIGHT_PLANNER_USER_SQL = readFileSync(join(__dirname, '006_add_flight_planner_user.sql'), 'utf8');
+const FLIGHT_PLANS_TEXT_ID_SQL = readFileSync(join(__dirname, '007_flight_plans_text_id.sql'),    'utf8');
 
 const MIGRATIONS = [
-  { name: '001_schema',                  sql: SCHEMA_SQL              },
-  { name: '002_seed',                    sql: SEED_SQL                },
-  { name: '003_multi_tenant',            sql: MULTI_TENANT_SQL        },
-  { name: '004_flight_plans',            sql: FLIGHT_PLANS_SQL        },
-  { name: '005_integration_configs',     sql: INTEGRATION_CONFIGS_SQL },
-  { name: '006_add_flight_planner_user', sql: FLIGHT_PLANNER_USER_SQL },
+  { name: '001_schema',                  sql: SCHEMA_SQL                },
+  { name: '002_seed',                    sql: SEED_SQL                  },
+  { name: '003_multi_tenant',            sql: MULTI_TENANT_SQL          },
+  { name: '004_flight_plans',            sql: FLIGHT_PLANS_SQL          },
+  { name: '005_integration_configs',     sql: INTEGRATION_CONFIGS_SQL   },
+  { name: '006_add_flight_planner_user', sql: FLIGHT_PLANNER_USER_SQL   },
+  { name: '007_flight_plans_text_id',    sql: FLIGHT_PLANS_TEXT_ID_SQL  },
 ];
 
 export const handler = async (): Promise<{ applied: string[]; skipped: string[] }> => {

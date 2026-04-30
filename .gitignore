@@ -60,6 +60,7 @@ terraform.rc
 **/lambdas/dist/
 **/lambdas/**/node_modules/
 **/lambdas/**/package-lock.json
+**/lambdas/shared/canonical/
 
 # Terraform binary tools
 .tools/
