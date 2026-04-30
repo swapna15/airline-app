@@ -116,7 +116,7 @@ export default function PlannerPage() {
   const normalizePlan = useCallback((raw: unknown): FlightPlan => {
     const r = (raw && typeof raw === 'object' ? raw : {}) as Partial<FlightPlan>;
     return {
-      flightId: r.flightId ?? selectedId,
+      flightId: r.flightId ?? selectedId ?? '',
       status:   r.status   ?? 'draft',
       phases:   { ...emptyPhases(), ...(r.phases ?? {}) },
       releasedAt: r.releasedAt,
