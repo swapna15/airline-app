@@ -222,6 +222,25 @@ export default function PlannerPage() {
     await recordReview(id, 'approve');
   };
 
+  // Bulk-approve every ready phase. Auto-prepare leaves phases in `ready`
+  // (human review still required by design); this is the one-click bridge to
+  // get from auto-prepare to a state where Release Dispatch enables.
+  const approveAllReady = async () => {
+    if (!plan || released) return;
+    const updates: Partial<PhasesMap> = {};
+    const ready: PhaseId[] = [];
+    for (const p of PHASES.slice(0, -1)) {
+      const ph = plan.phases[p.id];
+      if (ph.status === 'ready') {
+        updates[p.id] = { ...ph, status: 'approved' };
+        ready.push(p.id);
+      }
+    }
+    if (ready.length === 0) return;
+    await persistManyPhases(updates);
+    await Promise.all(ready.map((id) => recordReview(id, 'approve')));
+  };
+
   const rejectPhase = async (id: PhaseId) => {
     if (!plan || released) return;
     const comment = rejectComment;
@@ -250,7 +269,10 @@ export default function PlannerPage() {
     await recordReview('release', 'release');
   };
 
-  const allApproved = phases ? PHASES.slice(0, -1).every((p) => phases[p.id].status === 'approved') : false;
+  const reviewablePhases = PHASES.slice(0, -1);
+  const approvedCount = phases ? reviewablePhases.filter((p) => phases[p.id].status === 'approved').length : 0;
+  const readyCount    = phases ? reviewablePhases.filter((p) => phases[p.id].status === 'ready').length : 0;
+  const allApproved   = approvedCount === reviewablePhases.length;
 
   return (
     <div className="max-w-7xl mx-auto p-6">
@@ -295,7 +317,10 @@ export default function PlannerPage() {
               <FileSignature size={13} /> Released
             </span>
           ) : (
-            <div className="flex gap-2">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500">
+                {approvedCount}/{reviewablePhases.length} approved
+              </span>
               <button
                 onClick={startAutoPrepare}
                 disabled={autoBusy || loading}
@@ -304,6 +329,14 @@ export default function PlannerPage() {
               >
                 {autoBusy ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
                 Auto-prepare
+              </button>
+              <button
+                onClick={approveAllReady}
+                disabled={readyCount === 0 || loading}
+                className="px-4 py-2 rounded-lg bg-green-600 text-white text-sm font-medium disabled:bg-gray-200 disabled:text-gray-400 hover:bg-green-700 transition-colors flex items-center gap-1.5"
+                title="One-click approve every phase still in `ready` status — bypasses individual review"
+              >
+                <Check size={13} /> Approve all ready{readyCount > 0 ? ` (${readyCount})` : ''}
               </button>
               <button
                 onClick={releaseDispatch}
