@@ -13,11 +13,11 @@ const NAV_LINKS: Record<UserRole, { label: string; href: string }[]> = {
   checkin_agent:  [{ label: 'Check-in Desk', href: '/checkin' }],
   gate_manager:   [{ label: 'Gate Dashboard', href: '/gate' }],
   coordinator:    [{ label: 'Flight Operations', href: '/coordinator' }],
-  flight_planner: [{ label: 'Planner Dashboard', href: '/planner' }],
+  flight_planner: [{ label: 'Flight Planning', href: '/planner' }],
   admin:          [
     { label: 'Admin', href: '/admin' },
     { label: 'Operations', href: '/coordinator' },
-    { label: 'Planner', href: '/planner' },
+    { label: 'Flight Planning', href: '/planner' },
     { label: 'Gate', href: '/gate' },
     { label: 'Check-in', href: '/checkin' },
   ],
