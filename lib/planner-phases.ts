@@ -32,15 +32,8 @@ export const VALID_PHASES: ReadonlySet<string> = new Set<PhaseId>([
   'brief', 'aircraft', 'route', 'fuel', 'weight_balance', 'crew', 'slot_atc',
 ]);
 
-/**
- * Phase functions consume the canonical OwnFlight directly. The legacy
- * `FlightInput` shape was a stripped-down ad-hoc DTO; we keep the alias for
- * one release so existing call sites still work, but new code should depend
- * on `OwnFlight` from `@shared/schema/flight`.
- *
- * @deprecated Import `OwnFlight` from '@shared/schema/flight' instead.
- */
-export type FlightInput = OwnFlight;
+// Phase functions consume the canonical OwnFlight directly from
+// `@shared/schema/flight`. The legacy FlightInput alias has been removed.
 
 export interface PhaseResult {
   summary: string;
@@ -77,7 +70,7 @@ async function loadPastBriefRejections(token: string | null): Promise<PastReject
   return listRejectionComments('brief', 10);
 }
 
-export async function brief(f: FlightInput, authToken: string | null): Promise<PhaseResult> {
+export async function brief(f: OwnFlight, authToken: string | null): Promise<PhaseResult> {
   const o = lookupAirport(f.origin);
   const d = lookupAirport(f.destination);
   if (!o || !d) {
@@ -131,7 +124,7 @@ export async function brief(f: FlightInput, authToken: string | null): Promise<P
   };
 }
 
-export function route(f: FlightInput): PhaseResult {
+export function route(f: OwnFlight): PhaseResult {
   const o = lookupAirport(f.origin);
   const d = lookupAirport(f.destination);
   if (!o || !d) {
@@ -153,7 +146,7 @@ export function route(f: FlightInput): PhaseResult {
   };
 }
 
-export function fuel(f: FlightInput): PhaseResult {
+export function fuel(f: OwnFlight): PhaseResult {
   const o = lookupAirport(f.origin);
   const d = lookupAirport(f.destination);
   if (!o || !d) {
@@ -169,7 +162,7 @@ export function fuel(f: FlightInput): PhaseResult {
   return { summary, data: fe, source: 'perf-table (manufacturer specs)' };
 }
 
-export function aircraft(f: FlightInput): PhaseResult {
+export function aircraft(f: OwnFlight): PhaseResult {
   // Real path: lookup f.tail in fleet system; mocked here.
   const tail = f.tail ?? 'G-XLEK';
   return {
@@ -181,7 +174,7 @@ export function aircraft(f: FlightInput): PhaseResult {
   };
 }
 
-export function weightBalance(f: FlightInput): PhaseResult {
+export function weightBalance(f: OwnFlight): PhaseResult {
   const pax = f.paxLoad ?? 0;
   return {
     summary:
@@ -202,7 +195,7 @@ export function crew(): PhaseResult {
   };
 }
 
-export function slotAtc(f: FlightInput): PhaseResult {
+export function slotAtc(f: OwnFlight): PhaseResult {
   const std = depTimeHHmm(f);
   return {
     summary:
@@ -213,7 +206,7 @@ export function slotAtc(f: FlightInput): PhaseResult {
   };
 }
 
-export async function runPhase(id: PhaseId, f: FlightInput, authToken: string | null): Promise<PhaseResult> {
+export async function runPhase(id: PhaseId, f: OwnFlight, authToken: string | null): Promise<PhaseResult> {
   switch (id) {
     case 'brief':          return brief(f, authToken);
     case 'route':          return route(f);

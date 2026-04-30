@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getApiBearer } from '@/lib/api-auth';
-import { runPhase, VALID_PHASES, type PhaseId, type FlightInput } from '@/lib/planner-phases';
+import { runPhase, VALID_PHASES, type PhaseId } from '@/lib/planner-phases';
+import type { OwnFlight } from '@shared/schema/flight';
 
 export async function POST(
   req: NextRequest,
@@ -12,7 +13,7 @@ export async function POST(
 
   const authToken = await getApiBearer(req);
 
-  const body = await req.json() as { flight?: FlightInput };
+  const body = await req.json() as { flight?: OwnFlight };
   if (!body.flight) {
     return NextResponse.json({ error: 'flight is required' }, { status: 400 });
   }

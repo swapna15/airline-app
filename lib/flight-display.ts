@@ -5,8 +5,7 @@
  *   - separate `carrier` + `flightNumber` (so external systems can match)
  *   - ISO 8601 `scheduledDeparture` (so timezone is unambiguous)
  *
- * These helpers spell those out for UI surfaces and for the legacy
- * `FlightInput` shape the auto-prepare API still consumes.
+ * These helpers spell those out for UI surfaces.
  */
 
 import type { OwnFlight } from '@shared/schema/flight';

@@ -12,8 +12,8 @@
  * same; only this orchestrator file changes.
  */
 
-import { runPhase, type FlightInput, type PhaseId } from '@/lib/planner-phases';
-import { flightKey as canonicalFlightKey } from '@shared/schema/flight';
+import { runPhase, type PhaseId } from '@/lib/planner-phases';
+import { flightKey as canonicalFlightKey, type OwnFlight } from '@shared/schema/flight';
 
 export type RunPhaseStatus = 'pending' | 'running' | 'ready' | 'failed';
 
@@ -32,7 +32,7 @@ export type RunStatus = 'running' | 'completed' | 'partial' | 'failed';
 
 export interface Run {
   id: string;
-  flight: FlightInput;
+  flight: OwnFlight;
   status: RunStatus;
   phases: Record<PhaseId, RunPhaseState>;
   startedAt: string;
@@ -57,7 +57,7 @@ const ALL_PHASES: PhaseId[] = ['brief', 'route', 'crew', 'slot_atc', 'aircraft',
 
 // Wrap the canonical key so the registry's internal de-dup is consistent
 // with cross-source matching anywhere else in the codebase.
-function flightKey(f: FlightInput): string {
+function flightKey(f: OwnFlight): string {
   return canonicalFlightKey(f);
 }
 
@@ -79,7 +79,7 @@ export function listRuns(): Run[] {
   return Array.from(REG.byId.values()).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
-function newRun(flight: FlightInput, reviewerId?: string): Run {
+function newRun(flight: OwnFlight, reviewerId?: string): Run {
   return {
     id: newRunId(),
     flight,
@@ -100,7 +100,7 @@ function newRun(flight: FlightInput, reviewerId?: string): Run {
  * serverless (Vercel Functions), use `runToCompletion` instead, which awaits
  * inside one invocation and returns the finished Run.
  */
-export function startRun(flight: FlightInput, authToken: string | null, reviewerId?: string): Run {
+export function startRun(flight: OwnFlight, authToken: string | null, reviewerId?: string): Run {
   const key = flightKey(flight);
   const liveId = REG.liveByFlight.get(key);
   if (liveId) {
@@ -126,7 +126,7 @@ export function startRun(flight: FlightInput, authToken: string | null, reviewer
  * transition — useful for streaming live progress over NDJSON.
  */
 export async function runToCompletion(
-  flight: FlightInput,
+  flight: OwnFlight,
   authToken: string | null,
   reviewerId?: string,
   listener?: RunListener,
