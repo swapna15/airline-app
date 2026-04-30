@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ClipboardList, AlertOctagon, GitBranch, FileText, Fuel, Wrench, Users, Zap, ScrollText, DollarSign } from 'lucide-react';
+import { ClipboardList, AlertOctagon, GitBranch, FileText, Fuel, Wrench, Users, Zap, ScrollText, DollarSign, CloudLightning } from 'lucide-react';
 
 const TABS = [
   { href: '/planner',             label: 'Plans',       icon: ClipboardList },
   { href: '/planner/batch',       label: 'Batch',       icon: Zap },
   { href: '/planner/notams',      label: 'NOTAMs',      icon: ScrollText },
+  { href: '/planner/sigmet',      label: 'SIGMET',      icon: CloudLightning },
   { href: '/planner/divert',      label: 'Divert',      icon: AlertOctagon },
   { href: '/planner/cascade',     label: 'Cascade',     icon: GitBranch },
   { href: '/planner/tankering',   label: 'Tankering',   icon: Fuel },

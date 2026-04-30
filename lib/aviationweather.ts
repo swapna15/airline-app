@@ -29,10 +29,18 @@ export interface TafReport {
 
 export interface SigmetReport {
   airSigmetType?: string;
-  hazard?: string;
+  hazard?: string;     // 'TURB' | 'ICE' | 'IFR' | 'MTN' | 'VA' | 'TS' | …
   rawSigmet?: string;
   validTimeFrom?: string;
   validTimeTo?: string;
+  /** Issuing FIR / area control center, e.g. 'KZNY', 'EGTT'. */
+  firId?: string;
+  /** Altitude range in hundreds of feet (FL). */
+  minFL?: number;
+  maxFL?: number;
+  /** Polygon vertices the AviationWeather isigmet API returns under `coords`.
+   *  Each point is `{ lat, lon }` in degrees; first/last are the same vertex. */
+  coords?: Array<{ lat: number; lon: number }>;
 }
 
 async function getJson<T>(url: string): Promise<T> {
