@@ -97,6 +97,30 @@ jobs:
           print('Skipped:', r.get('skipped', []))
           "
 
+      # Roll the seeded demo flights forward to today on every deploy. Keeps
+      # /planner populated without anyone needing to remember to run an
+      # ad-hoc refresh. The migrate Lambda's refresh-flights mode runs the
+      # 003_refresh_flight_dates SQL outside the migrations table.
+      - name: Refresh demo flight dates
+        run: |
+          aws lambda invoke \
+            --function-name $(terraform output -raw migrate_function_name) \
+            --payload '{"mode":"refresh-flights"}' \
+            --cli-binary-format raw-in-base64-out \
+            /tmp/refresh-result.json
+          echo "Refresh result: $(cat /tmp/refresh-result.json)"
+          python3 -c "
+          import json, sys
+          r = json.load(open('/tmp/refresh-result.json'))
+          if 'errorMessage' in r:
+              print('Flight refresh failed:', r.get('errorMessage'), r.get('errorType'))
+              sys.exit(1)
+          if not r.get('refreshed'):
+              print('Refresh did not run:', r)
+              sys.exit(1)
+          print('Demo flights refreshed to today.')
+          "
+
   deploy:
     name: Deploy Frontend to Vercel
     runs-on: ubuntu-latest
