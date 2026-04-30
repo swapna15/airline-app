@@ -144,6 +144,96 @@ async function testConfig(
   return ok(result);
 }
 
+// ── /admin/ops-specs (per-tenant Operations Specifications) ─────────────────
+//
+// Same admin / per-tenant plane as integrations, so this Lambda hosts both
+// rather than fan out into a third tiny Lambda. Schema in migration 010.
+async function getOpsSpecs(tenantId: string): Promise<APIGatewayProxyResult> {
+  const row = await queryOne<{
+    fuel_policy: Record<string, unknown>;
+    alternate_minima: Record<string, unknown>;
+    etops_approval: Record<string, unknown>;
+    pbn_authorizations: Record<string, unknown>;
+    cost_index: Record<string, unknown>;
+    authorized_airports: string[];
+    notes: string | null;
+    updated_at: string;
+  }>(
+    `SELECT fuel_policy, alternate_minima, etops_approval, pbn_authorizations,
+            cost_index, authorized_airports, notes, updated_at
+       FROM ops_specs WHERE tenant_id = $1`,
+    [tenantId],
+  );
+  if (!row) return ok({
+    fuelPolicy: {}, alternateMinima: {}, etopsApproval: {}, pbnAuthorizations: {},
+    costIndex: {}, authorizedAirports: [], notes: null, updatedAt: null,
+  });
+  return ok({
+    fuelPolicy:         row.fuel_policy,
+    alternateMinima:    row.alternate_minima,
+    etopsApproval:      row.etops_approval,
+    pbnAuthorizations:  row.pbn_authorizations,
+    costIndex:          row.cost_index,
+    authorizedAirports: row.authorized_airports,
+    notes:              row.notes,
+    updatedAt:          row.updated_at,
+  });
+}
+
+interface UpsertOpsSpecsBody {
+  fuelPolicy?:         Record<string, unknown>;
+  alternateMinima?:    Record<string, unknown>;
+  etopsApproval?:      Record<string, unknown>;
+  pbnAuthorizations?:  Record<string, unknown>;
+  costIndex?:          Record<string, unknown>;
+  authorizedAirports?: string[];
+  notes?:              string;
+}
+
+async function upsertOpsSpecs(
+  tenantId: string,
+  body: string | null,
+  reviewerId: string,
+): Promise<APIGatewayProxyResult> {
+  const data = parseBody<UpsertOpsSpecsBody>(body);
+  if (!data) return badRequest('invalid JSON body');
+  await queryOne(
+    `INSERT INTO ops_specs
+       (tenant_id, fuel_policy, alternate_minima, etops_approval,
+        pbn_authorizations, cost_index, authorized_airports, notes, updated_by)
+     VALUES ($1,
+             COALESCE($2::jsonb, '{}'::jsonb),
+             COALESCE($3::jsonb, '{}'::jsonb),
+             COALESCE($4::jsonb, '{}'::jsonb),
+             COALESCE($5::jsonb, '{}'::jsonb),
+             COALESCE($6::jsonb, '{}'::jsonb),
+             COALESCE($7, '{}'::text[]),
+             $8, $9)
+     ON CONFLICT (tenant_id) DO UPDATE
+       SET fuel_policy         = COALESCE(EXCLUDED.fuel_policy,        ops_specs.fuel_policy),
+           alternate_minima    = COALESCE(EXCLUDED.alternate_minima,   ops_specs.alternate_minima),
+           etops_approval      = COALESCE(EXCLUDED.etops_approval,     ops_specs.etops_approval),
+           pbn_authorizations  = COALESCE(EXCLUDED.pbn_authorizations, ops_specs.pbn_authorizations),
+           cost_index          = COALESCE(EXCLUDED.cost_index,         ops_specs.cost_index),
+           authorized_airports = COALESCE(EXCLUDED.authorized_airports, ops_specs.authorized_airports),
+           notes               = EXCLUDED.notes,
+           updated_by          = EXCLUDED.updated_by,
+           updated_at          = NOW()`,
+    [
+      tenantId,
+      data.fuelPolicy        ? JSON.stringify(data.fuelPolicy)        : null,
+      data.alternateMinima   ? JSON.stringify(data.alternateMinima)   : null,
+      data.etopsApproval     ? JSON.stringify(data.etopsApproval)     : null,
+      data.pbnAuthorizations ? JSON.stringify(data.pbnAuthorizations) : null,
+      data.costIndex         ? JSON.stringify(data.costIndex)         : null,
+      data.authorizedAirports ?? null,
+      data.notes ?? null,
+      reviewerId,
+    ],
+  );
+  return getOpsSpecs(tenantId);
+}
+
 // ── Router ──────────────────────────────────────────────────────────────────
 export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayProxyResult> => {
   try {
@@ -158,6 +248,12 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     const tenantId = await resolveTenantId(tenantSlug);
     if (!tenantId) return badRequest(`unknown tenant: ${tenantSlug}`);
+
+    // /admin/ops-specs (per-tenant Operations Specifications)
+    if (path.endsWith('/admin/ops-specs')) {
+      if (method === 'GET') return getOpsSpecs(tenantId);
+      if (method === 'PUT') return upsertOpsSpecs(tenantId, event.body, reviewerId);
+    }
 
     const kind = event.pathParameters?.kind;
 

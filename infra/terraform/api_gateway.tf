@@ -290,6 +290,14 @@ resource "aws_api_gateway_resource" "admin_dispatchers_userId_currency" {
   path_part   = "currency"
 }
 
+# /admin/ops-specs — per-tenant Operations Specifications (fuel policy,
+# alternate minima, ETOPS approval, PBN auths, cost index, authorized airports)
+resource "aws_api_gateway_resource" "admin_ops_specs" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.admin.id
+  path_part   = "ops-specs"
+}
+
 # /admin/integrations — per-tenant integration configs (DB-backed in phase 5)
 resource "aws_api_gateway_resource" "admin_integrations" {
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -398,6 +406,10 @@ locals {
     "PUT-admin-dispatchers-userId-areas"  = { method = "PUT", resource_id = aws_api_gateway_resource.admin_dispatchers_userId_areas.id,     lambda_arn = aws_lambda_function.dispatchers.invoke_arn, auth = true },
     "PUT-admin-dispatchers-userId-types"  = { method = "PUT", resource_id = aws_api_gateway_resource.admin_dispatchers_userId_types.id,     lambda_arn = aws_lambda_function.dispatchers.invoke_arn, auth = true },
     "PUT-admin-dispatchers-userId-currency" = { method = "PUT", resource_id = aws_api_gateway_resource.admin_dispatchers_userId_currency.id, lambda_arn = aws_lambda_function.dispatchers.invoke_arn, auth = true },
+
+    # Admin ops-specs — admin only (handled by integrations Lambda)
+    "GET-admin-ops-specs"              = { method = "GET",    resource_id = aws_api_gateway_resource.admin_ops_specs.id,              lambda_arn = aws_lambda_function.integrations.invoke_arn, auth = true  },
+    "PUT-admin-ops-specs"              = { method = "PUT",    resource_id = aws_api_gateway_resource.admin_ops_specs.id,              lambda_arn = aws_lambda_function.integrations.invoke_arn, auth = true  },
 
     # Admin integrations — admin only (enforced by handler)
     "GET-admin-integrations"           = { method = "GET",    resource_id = aws_api_gateway_resource.admin_integrations.id,           lambda_arn = aws_lambda_function.integrations.invoke_arn, auth = true  },

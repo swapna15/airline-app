@@ -18,6 +18,7 @@ import { listRejectionComments } from '@/lib/planner-store';
 import type { OwnFlight } from '@shared/schema/flight';
 import { getRoster, getAssignments, assignmentsForFlight } from '@/lib/crew';
 import { scoreCrewBatch, REJECT_FATIGUE_THRESHOLD, HIGH_FATIGUE_THRESHOLD } from '@/lib/crew-fatigue';
+import { loadOpsSpecs } from '@/lib/ops-specs';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
@@ -148,20 +149,37 @@ export function route(f: OwnFlight): PhaseResult {
   };
 }
 
-export function fuel(f: OwnFlight): PhaseResult {
+export async function fuel(f: OwnFlight, authToken: string | null): Promise<PhaseResult> {
   const o = lookupAirport(f.origin);
   const d = lookupAirport(f.destination);
   if (!o || !d) {
     return { summary: 'Airport reference missing; fuel skipped.', data: { error: 'unknown_airport' }, source: 'planner-internal' };
   }
 
-  const fe = fuelEstimate(o, d, aircraftLabel(f));
+  // Tenant fuel policy from /admin/ops-specs (migration 010). Falls back to
+  // sensible defaults when NEXT_PUBLIC_API_URL isn't set or the call fails,
+  // matching the values previously hardcoded in lib/perf.ts.
+  const ops = await loadOpsSpecs(authToken);
+  const fp  = ops.fuelPolicy;
+
+  const fe = fuelEstimate(o, d, aircraftLabel(f), {
+    contingencyPct:      fp.contingencyPct,
+    alternateMinutes:    fp.alternateMinutes,
+    finalReserveMinutes: fp.finalReserveMinutes,
+    taxiKg:              fp.taxiKg,
+    captainsFuelMinutes: fp.captainsFuelMinutes,
+  });
+
   const summary =
     `Fuel estimate (${aircraftLabel(f)}): trip ${fe.trip.toLocaleString()} kg · contingency ${fe.contingency.toLocaleString()} kg ` +
-    `(5%) · alternate ${fe.alternate.toLocaleString()} kg (45 min) · reserve ${fe.reserve.toLocaleString()} kg (30 min) · ` +
+    `(${fp.contingencyPct}%) · alternate ${fe.alternate.toLocaleString()} kg (${fp.alternateMinutes} min) · ` +
+    `reserve ${fe.reserve.toLocaleString()} kg (${fp.finalReserveMinutes} min) · ` +
+    (fp.captainsFuelMinutes > 0 && fe.captainsFuel
+      ? `captain's fuel ${fe.captainsFuel.toLocaleString()} kg (${fp.captainsFuelMinutes} min) · `
+      : '') +
     `taxi ${fe.taxi} kg. Block fuel ${fe.block.toLocaleString()} kg vs MTOW ${fe.mtowKg.toLocaleString()} kg.`;
 
-  return { summary, data: fe, source: 'perf-table (manufacturer specs)' };
+  return { summary, data: { ...fe, policy: fp }, source: 'perf-table + tenant ops-specs' };
 }
 
 export function aircraft(f: OwnFlight): PhaseResult {
@@ -252,7 +270,7 @@ export async function runPhase(id: PhaseId, f: OwnFlight, authToken: string | nu
   switch (id) {
     case 'brief':          return brief(f, authToken);
     case 'route':          return route(f);
-    case 'fuel':           return fuel(f);
+    case 'fuel':           return fuel(f, authToken);
     case 'aircraft':       return aircraft(f);
     case 'weight_balance': return weightBalance(f);
     case 'crew':           return crew(f);

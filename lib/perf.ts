@@ -76,19 +76,48 @@ export interface FuelEstimate {
  *  - final reserve = 30 min at cruise burn
  *  - taxi fuel = 600 kg flat
  */
-export function fuelEstimate(a: AirportRef, b: AirportRef, aircraft: string): FuelEstimate {
+export interface FuelPolicyOverrides {
+  /** % of trip fuel — default 5 */
+  contingencyPct?: number;
+  /** minutes at cruise burn — default 45 */
+  alternateMinutes?: number;
+  /** minutes at cruise burn — default 30 */
+  finalReserveMinutes?: number;
+  /** kg, flat — default 600 */
+  taxiKg?: number;
+  /** discretionary captain's fuel, minutes at cruise burn — default 0 */
+  captainsFuelMinutes?: number;
+}
+
+export function fuelEstimate(
+  a: AirportRef,
+  b: AirportRef,
+  aircraft: string,
+  policy: FuelPolicyOverrides = {},
+): FuelEstimate & { captainsFuel?: number } {
   const { burnKgPerHr, mach, mtowKg } = matchPerf(aircraft);
+  const contingencyPct      = policy.contingencyPct      ?? 5;
+  const alternateMinutes    = policy.alternateMinutes    ?? 45;
+  const finalReserveMinutes = policy.finalReserveMinutes ?? 30;
+  const taxiKg              = policy.taxiKg              ?? 600;
+  const captainsFuelMinutes = policy.captainsFuelMinutes ?? 0;
+
   const distanceNM    = Math.round(greatCircleNM(a, b));
   const cruiseSpeedKt = Math.round(mach * TAS_KT_PER_MACH);
   const tripHours     = distanceNM / cruiseSpeedKt;
   const trip          = Math.round(tripHours * burnKgPerHr);
-  const contingency   = Math.round(trip * 0.05);
-  const alternate     = Math.round(burnKgPerHr * (45 / 60));
-  const reserve       = Math.round(burnKgPerHr * (30 / 60));
-  const taxi          = 600;
-  const block         = trip + contingency + alternate + reserve + taxi;
+  const contingency   = Math.round(trip * (contingencyPct / 100));
+  const alternate     = Math.round(burnKgPerHr * (alternateMinutes / 60));
+  const reserve       = Math.round(burnKgPerHr * (finalReserveMinutes / 60));
+  const captainsFuel  = Math.round(burnKgPerHr * (captainsFuelMinutes / 60));
+  const taxi          = taxiKg;
+  const block         = trip + contingency + alternate + reserve + captainsFuel + taxi;
   const blockTimeMin  = Math.round(tripHours * 60) + 15;
-  return { distanceNM, cruiseSpeedKt, blockTimeMin, trip, contingency, alternate, reserve, taxi, block, mtowKg };
+  return {
+    distanceNM, cruiseSpeedKt, blockTimeMin,
+    trip, contingency, alternate, reserve, taxi, block, mtowKg,
+    ...(captainsFuel > 0 ? { captainsFuel } : {}),
+  };
 }
 
 /**
