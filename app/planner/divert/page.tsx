@@ -36,6 +36,9 @@ interface Alternate {
   metar?: string;
   ceilingFt: number | null;
   visSm: number | null;
+  minimaSource: 'taf' | 'metar' | 'none';
+  tafWorstSource?: 'BASE' | 'FM' | 'BECMG' | 'TEMPO' | 'PROB' | 'none';
+  etaIso: string;
   meetsAlternateMinima: 'yes' | 'no' | 'unknown';
   runwayAdequate: boolean;
   customs: boolean;
@@ -56,9 +59,12 @@ interface DivertResponse {
   etopsAdequateCount: number;
   meetsMinimaCount: number;
   authorizedRankedCount: number;
+  tafSourceCount: number;
+  metarSourceCount: number;
   destAuthorized: boolean;
   alternateMinima: { alternateCeilingFt: number; alternateVisSm: number };
   authorizedAirportsCount: number;
+  cruiseSpeedKt: number;
   ranked: Alternate[];
   source: string;
 }
@@ -168,6 +174,12 @@ export default function DivertPage() {
               alt minima ≥{result.alternateMinima.alternateCeilingFt} ft / ≥{result.alternateMinima.alternateVisSm} SM · {result.meetsMinimaCount} pass
             </span>
             <span
+              className="ml-2 px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 font-medium"
+              title="How each candidate's ceiling/vis was assessed: TAF forecast at ETA ±1hr (preferred) or current METAR fallback"
+            >
+              wx source: {result.tafSourceCount} TAF · {result.metarSourceCount} METAR
+            </span>
+            <span
               className={`ml-2 px-1.5 py-0.5 rounded font-medium ${
                 result.authorizedAirportsCount > 0
                   ? 'bg-emerald-50 text-emerald-700'
@@ -274,11 +286,22 @@ export default function DivertPage() {
                               ? 'bg-red-50 text-red-700 border border-red-200'
                               : 'bg-gray-50 text-gray-500 border border-gray-200'
                         }`}
-                        title={`Parsed METAR ceiling ${alt.ceilingFt ?? '—'} ft / vis ${alt.visSm ?? '—'} SM vs OpsSpec C055 floor`}
+                        title={
+                          alt.minimaSource === 'taf'
+                            ? `TAF forecast at ETA ${new Date(alt.etaIso).toLocaleTimeString()} ±1h (worst-case ${alt.tafWorstSource}): ceiling ${alt.ceilingFt ?? '—'} ft / vis ${alt.visSm ?? '—'} SM vs OpsSpec C055 floor`
+                            : alt.minimaSource === 'metar'
+                              ? `Current METAR (TAF unavailable / out-of-window): ceiling ${alt.ceilingFt ?? '—'} ft / vis ${alt.visSm ?? '—'} SM vs OpsSpec C055 floor`
+                              : 'no WX data — minima unverified'
+                        }
                       >
                         {alt.meetsAlternateMinima === 'yes' && '✓ alt min'}
                         {alt.meetsAlternateMinima === 'no'  && '✕ below alt min'}
                         {alt.meetsAlternateMinima === 'unknown' && '? alt min'}
+                        {alt.minimaSource !== 'none' && (
+                          <span className="ml-1 text-[9px] opacity-70 uppercase">
+                            {alt.minimaSource}
+                          </span>
+                        )}
                       </span>
                     </div>
 
@@ -303,8 +326,14 @@ export default function DivertPage() {
                       {(alt.ceilingFt !== null || alt.visSm !== null) && (
                         <span className="flex items-center gap-1 text-gray-500">
                           ceil {alt.ceilingFt !== null ? `${alt.ceilingFt} ft` : '∞'} · vis {alt.visSm !== null ? `${alt.visSm} SM` : '?'}
+                          {alt.minimaSource === 'taf' && alt.tafWorstSource && alt.tafWorstSource !== 'none' && (
+                            <span className="text-indigo-600">({alt.tafWorstSource})</span>
+                          )}
                         </span>
                       )}
+                      <span className="flex items-center gap-1 text-gray-400">
+                        ETA {new Date(alt.etaIso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}Z
+                      </span>
                     </div>
 
                     {alt.metar && (

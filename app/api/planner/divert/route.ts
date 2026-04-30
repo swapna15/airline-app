@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { lookupAirport, type AirportRef } from '@/lib/icao';
 import { findCandidatesWithin, greatCircleNM } from '@/lib/perf';
-import { fetchMetars, parseMetarMinima } from '@/lib/aviationweather';
-import type { MetarReport } from '@/lib/aviationweather';
+import { fetchMetars, fetchTafs, parseMetarMinima, tafForWindow } from '@/lib/aviationweather';
+import type { MetarReport, TafReport } from '@/lib/aviationweather';
 import { loadOpsSpecs, type AlternateMinima } from '@/lib/ops-specs';
 import { getApiBearer } from '@/lib/api-auth';
+import { aircraftPerformance } from '@shared/semantic/aircraft';
 
 type DivertReason = 'medical' | 'mechanical' | 'weather' | 'fuel';
 
@@ -24,6 +25,12 @@ interface AlternateScore {
   metar?: string;
   ceilingFt: number | null;
   visSm: number | null;
+  /** Where ceilingFt/visSm came from for the minima check. */
+  minimaSource: 'taf' | 'metar' | 'none';
+  /** Which TAF chunk drove the worst-case (when minimaSource='taf'). */
+  tafWorstSource?: 'BASE' | 'FM' | 'BECMG' | 'TEMPO' | 'PROB' | 'none';
+  /** ISO ETA at this alt — divert from now at cruise speed. */
+  etaIso: string;
   meetsAlternateMinima: 'yes' | 'no' | 'unknown';
   runwayAdequate: boolean;
   customs: boolean;
@@ -145,14 +152,25 @@ export async function POST(req: NextRequest) {
   // Cap to top 60 closest before WX lookup. Score-based final ranking still applies.
   const candidates = nearby.slice(0, 60);
 
-  // Live METARs for the candidate set (single batched call)
+  // Live METARs + TAFs for the candidate set (parallel fetch). TAF gives the
+  // ETA-window forecast for OpsSpec C055; METAR is the fallback when TAF is
+  // missing or out-of-validity.
   let metars: MetarReport[] = [];
+  let tafs:   TafReport[]   = [];
   try {
-    metars = await fetchMetars(candidates.map((c) => c.icao));
+    const icaos = candidates.map((c) => c.icao);
+    [metars, tafs] = await Promise.all([fetchMetars(icaos), fetchTafs(icaos)]);
   } catch {
     // proceed without WX if AviationWeather is down
   }
   const metarById = new Map(metars.map((m) => [m.icaoId, m]));
+  const tafById   = new Map(tafs.map((t) => [t.icaoId, t]));
+
+  // Cruise speed for ETA-at-alt computation. Falls back to 460 kt if the
+  // ontology doesn't carry the type.
+  const perf = aircraftPerformance(body.aircraft);
+  const cruiseKt = perf ? Math.round(perf.cruiseMach * 573) : 460;
+  const now = Date.now();
 
   const scored: AlternateScore[] = candidates.map((a) => {
     const metar = metarById.get(a.icao);
@@ -165,12 +183,41 @@ export async function POST(req: NextRequest) {
       || authorizedSet.has(a.icao.toUpperCase())
       || authorizedSet.has(a.iata.toUpperCase());
 
-    const minima = metar
-      ? parseMetarMinima(metar)
-      : { ceilingFt: null, visSm: null };
-    const meetsAlternateMinima: 'yes' | 'no' | 'unknown' = metar
-      ? checkAlternateMinima(minima.ceilingFt, minima.visSm, opsSpecs.alternateMinima)
-      : 'unknown';
+    // ETA at this alternate: divert from now at cruise speed. For real
+    // dispatch the trigger time is the divert decision; for our
+    // planning-tool semantic that's "now".
+    const eta = new Date(now + (distFromDest / cruiseKt) * 3_600_000);
+
+    const taf = tafById.get(a.icao);
+    const tafWindow = taf ? tafForWindow(taf, eta) : null;
+    const useTaf =
+      !!tafWindow && tafWindow.withinValidity && tafWindow.groupsConsidered > 0;
+
+    let ceilingFt: number | null;
+    let visSm:     number | null;
+    let minimaSource: 'taf' | 'metar' | 'none';
+    let tafWorstSource: AlternateScore['tafWorstSource'];
+
+    if (useTaf && tafWindow) {
+      ceilingFt = tafWindow.ceilingFt;
+      visSm = tafWindow.visSm;
+      minimaSource = 'taf';
+      tafWorstSource = tafWindow.worstSource;
+    } else if (metar) {
+      const m = parseMetarMinima(metar);
+      ceilingFt = m.ceilingFt;
+      visSm = m.visSm;
+      minimaSource = 'metar';
+    } else {
+      ceilingFt = null;
+      visSm = null;
+      minimaSource = 'none';
+    }
+
+    const meetsAlternateMinima: 'yes' | 'no' | 'unknown' =
+      minimaSource === 'none'
+        ? 'unknown'
+        : checkAlternateMinima(ceilingFt, visSm, opsSpecs.alternateMinima);
 
     const score = scoreFor(body.reason, etopsRequired, {
       distance: distFromDest,
@@ -190,10 +237,12 @@ export async function POST(req: NextRequest) {
     if (etopsRequired && !a.etopsAlternate) notes.push('not ETOPS-adequate (lighting/runway/customs)');
     if (!authorized) notes.push('not in OpsSpec authorized-airports list');
     if (meetsAlternateMinima === 'no') {
-      const ceilStr = minima.ceilingFt !== null ? `${minima.ceilingFt} ft` : 'unlimited';
-      const visStr  = minima.visSm !== null ? `${minima.visSm} SM` : '?';
+      const ceilStr = ceilingFt !== null ? `${ceilingFt} ft` : 'unlimited';
+      const visStr  = visSm     !== null ? `${visSm} SM` : '?';
+      const sourceTag =
+        minimaSource === 'taf' ? `TAF ETA±1h (${tafWorstSource})` : 'current METAR';
       notes.push(
-        `WX ${ceilStr} / ${visStr} below alt minima ${opsSpecs.alternateMinima.alternateCeilingFt} ft / ${opsSpecs.alternateMinima.alternateVisSm} SM`,
+        `${sourceTag}: ${ceilStr} / ${visStr} below alt minima ${opsSpecs.alternateMinima.alternateCeilingFt} ft / ${opsSpecs.alternateMinima.alternateVisSm} SM`,
       );
     } else if (meetsAlternateMinima === 'unknown' && !metar) {
       notes.push('no METAR — alternate minima unverified');
@@ -210,8 +259,11 @@ export async function POST(req: NextRequest) {
       distanceFromDestNM:   Math.round(distFromDest),
       fltCat:               metar?.fltCat,
       metar:                metar?.rawOb,
-      ceilingFt:            minima.ceilingFt,
-      visSm:                minima.visSm,
+      ceilingFt,
+      visSm,
+      minimaSource,
+      tafWorstSource,
+      etaIso:               eta.toISOString(),
       meetsAlternateMinima,
       runwayAdequate,
       customs:              a.customs,
@@ -232,12 +284,21 @@ export async function POST(req: NextRequest) {
   const etopsAdequateCount    = nearby.filter((a) => a.etopsAlternate).length;
   const meetsMinimaCount      = scored.filter((s) => s.meetsAlternateMinima === 'yes').length;
   const authorizedRankedCount = scored.filter((s) => s.authorized).length;
+  const tafSourceCount        = scored.filter((s) => s.minimaSource === 'taf').length;
+  const metarSourceCount      = scored.filter((s) => s.minimaSource === 'metar').length;
 
   // Surface a destination-authorization warning when the operator has an
   // authorized-airports list and the filed destination isn't on it.
   const destAuthorized = !hasAuthList
     || authorizedSet.has(dest.icao.toUpperCase())
     || authorizedSet.has(dest.iata.toUpperCase());
+
+  // Build a tight source string that records what we actually pulled from
+  // each feed, plus the breakdown of how minima were assessed per candidate.
+  const wxBits: string[] = [];
+  if (tafs.length)   wxBits.push(`taf:${tafSourceCount}`);
+  if (metars.length) wxBits.push(`metar:${metarSourceCount}`);
+  const wxTag = wxBits.length ? `aviationweather (${wxBits.join(' + ')})` : 'no live WX';
 
   return NextResponse.json({
     flight: body.flight,
@@ -248,12 +309,13 @@ export async function POST(req: NextRequest) {
     etopsAdequateCount,
     meetsMinimaCount,
     authorizedRankedCount,
+    tafSourceCount,
+    metarSourceCount,
     destAuthorized,
     alternateMinima: opsSpecs.alternateMinima,
     authorizedAirportsCount: authorizedSet.size,
+    cruiseSpeedKt: cruiseKt,
     ranked,
-    source: metars.length
-      ? `aviationweather:metar + ourairports (${nearby.length} in 1000nm; ${etopsAdequateCount} ETOPS-adequate; ${meetsMinimaCount} meet alt minima)`
-      : `ourairports (${nearby.length} in 1000nm; ${etopsAdequateCount} ETOPS-adequate; no live WX)`,
+    source: `${wxTag} + ourairports (${nearby.length} in 1000nm; ${etopsAdequateCount} ETOPS-adequate; ${meetsMinimaCount} meet alt minima)`,
   });
 }
