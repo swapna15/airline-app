@@ -14,6 +14,7 @@ const FLIGHT_PLANS_SQL        = readFileSync(join(__dirname, '004_flight_plans.s
 const INTEGRATION_CONFIGS_SQL = readFileSync(join(__dirname, '005_integration_configs.sql'),     'utf8');
 const FLIGHT_PLANNER_USER_SQL = readFileSync(join(__dirname, '006_add_flight_planner_user.sql'), 'utf8');
 const FLIGHT_PLANS_TEXT_ID_SQL = readFileSync(join(__dirname, '007_flight_plans_text_id.sql'),    'utf8');
+const REFRESH_FLIGHTS_SQL      = readFileSync(join(__dirname, '003_refresh_flight_dates.sql'),    'utf8');
 
 const MIGRATIONS = [
   { name: '001_schema',                  sql: SCHEMA_SQL                },
@@ -25,11 +26,27 @@ const MIGRATIONS = [
   { name: '007_flight_plans_text_id',    sql: FLIGHT_PLANS_TEXT_ID_SQL  },
 ];
 
-export const handler = async (): Promise<{ applied: string[]; skipped: string[] }> => {
+interface MigrateEvent { mode?: 'migrate' | 'refresh-flights' }
+
+export const handler = async (
+  event?: MigrateEvent,
+): Promise<{ applied: string[]; skipped: string[]; refreshed?: boolean }> => {
   const pool   = await getPool();
   const client = await pool.connect();
   const applied: string[] = [];
   const skipped: string[] = [];
+
+  // Ad-hoc data refresh — runs the rolling-dates SQL outside the
+  // schema_migrations table so the demo flights can be moved forward
+  // whenever needed. Invoke with: `--payload '{"mode":"refresh-flights"}'`.
+  if (event?.mode === 'refresh-flights') {
+    try {
+      await client.query(REFRESH_FLIGHTS_SQL);
+      return { applied: [], skipped: [], refreshed: true };
+    } finally {
+      client.release();
+    }
+  }
 
   try {
     // Ensure migration tracking table exists (idempotent)
