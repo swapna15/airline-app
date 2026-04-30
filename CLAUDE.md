@@ -39,12 +39,14 @@ Two project-specific Claude Code skills are registered:
 
 ## Project Specs
 
-`.claude/specs/` contains:
-- `requirements.md` — full functional/non-functional requirements (source of truth for intended behavior)
-- `tasks.md` — phased implementation checklist with verification steps
-- `design.md` — design decisions
+`.claude/specs/` contains the current set of specifications, all kept up to date alongside the code:
+- `requirements.md` — current functional + non-functional requirements (the WHAT)
+- `design.md` — current architecture + design decisions (the HOW)
+- `tasks.md` — current build status: shipped, pending, deferred (the WHERE-WE-ARE)
+- `flight_planning_design.md` — industry / regulatory background reference (FAR 121, ICAO Annex 6, dispatcher identity, OpsSpecs theory). Background reading; not actively edited.
+- `flight-planner-enhancements/requirements.md` — dispatch-enhancement R1–R10 acceptance-criteria audit (formerly under `.kiro/`). All ten requirements shipped.
 
-`.kiro/specs/flight-planner-enhancements/requirements.md` tracks the next round of planner work (tankering, MEL impact, schedule deconfliction — the three ❌ items not yet built).
+The comprehensive end-to-end reference (with installation, configuration walkthroughs, architecture diagrams, testing instructions, glossary) lives at `GAAS-AIRLINEOS.md` in the repo root. The spec files focus on a single concern each; the GAAS doc covers everything.
 
 ## Architecture
 
