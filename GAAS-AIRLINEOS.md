@@ -1,624 +1,1214 @@
-# AirlineOS GAAS — Generative AI as a Service for Airline Operations
+# AirlineOS GAAS — The Complete Reference
 
-> A multi-tenant SaaS flight-planning, dispatch, and operations platform where every
-> deterministic regulatory engine (ETOPS, OpsSpecs, fuel policy, MEL, crew FDP) is
-> wrapped by a **multi-agent generative AI layer** with RAG, per-tenant memory,
-> and pluggable vector storage. The AI re-phrases facts and flags risk; humans
-> retain operational control under FAR 121.533 / ICAO Annex 6.
+> **What this is**: a multi-tenant SaaS platform that any airline can sign up to and immediately get
+> a working flight-dispatch operation. It combines a regulatory-grade dispatch engine, a pluggable
+> integration layer (fuel, MEL, crew), a passenger-facing booking surface, and a generative-AI
+> layer that learns each airline's operating habits over time.
+>
+> **Who it's for**: airline operations control centres (OCCs), dispatchers, gate agents, and
+> passengers — all served from a single deployment, isolated by tenant.
+>
+> **Status**: a working dispatch core + 5 per-phase AI agents + per-tenant memory are live on `main`.
+> Non-trivial gaps remain (wind-optimized routing, Form 7233-4 generator, conflict zones); see §11.
 
 ---
 
 ## Table of contents
 
-1. [Overview](#1-overview)
-2. [What makes AirlineOS GAAS unique](#2-what-makes-airlineos-gaas-unique)
-3. [Installation](#3-installation)
-4. [Configuration for a specific airline (tenant onboarding)](#4-configuration-for-a-specific-airline-tenant-onboarding)
-5. [Application features](#5-application-features)
-6. [AI features (the GAAS layer)](#6-ai-features-the-gaas-layer)
-7. [How it works — architecture](#7-how-it-works--architecture)
-8. [Testing the current features](#8-testing-the-current-features)
-9. [Advantages over building piecewise](#9-advantages-over-building-piecewise)
-10. [Pending items](#10-pending-items)
+1. [TL;DR — read this first](#1-tldr--read-this-first)
+2. [The three layers explained](#2-the-three-layers-explained)
+3. [Who uses what (personas + pages)](#3-who-uses-what-personas--pages)
+4. [Multi-tenancy — how SaaS works here](#4-multi-tenancy--how-saas-works-here)
+5. [**Complete feature inventory**](#5-complete-feature-inventory)
+6. [Onboarding a new airline (end-to-end walkthrough)](#6-onboarding-a-new-airline-end-to-end-walkthrough)
+7. [Dispatch core — what the engines compute](#7-dispatch-core--what-the-engines-compute)
+8. [GAAS AI layer — what the agents do](#8-gaas-ai-layer--what-the-agents-do)
+9. [Installation](#9-installation)
+10. [Configuration reference (every per-tenant knob)](#10-configuration-reference-every-per-tenant-knob)
+11. [Testing](#11-testing)
+12. [Pending items / roadmap](#12-pending-items--roadmap)
+13. [Glossary](#13-glossary)
+14. [Appendix — file map](#14-appendix--file-map)
 
 ---
 
-## 1. Overview
+## 1. TL;DR — read this first
 
-AirlineOS is a multi-tenant, multi-airline SaaS platform that combines:
+AirlineOS is **one product, three layers**:
 
-- **A regulated dispatch core** — 8-phase OFP workflow (brief / aircraft / route /
-  fuel / weight & balance / crew / slot-ATC / release), backed by deterministic
-  engines for ETOPS, OpsSpecs, MEL, crew FDP, fuel, schedule, and tankering.
-- **A generative AI layer ("GAAS")** — per-phase agents that consume structured
-  facts, retrieve relevant prior knowledge via RAG, and produce dispatcher-grade
-  narrative. The AI never invents numbers; it re-phrases what's true.
-- **A multi-tenant data plane** — every tenant has its own OpsSpecs, fleet, MEL,
-  fuel-price feed, crew roster, vector corpus, and accumulated AI memory, with
-  Postgres row-level-security enforcing isolation.
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ LAYER 1 — Multi-tenant SaaS shell                                    │
+│   Tenants, RBAC, JWT, Postgres RLS, admin UI, billing-ready.        │
+│   Every airline = one row in `tenants`. All other data per-tenant.  │
+└─────────────────────────────────────────────────────────────────────┘
+                                  ▲
+┌─────────────────────────────────────────────────────────────────────┐
+│ LAYER 2 — Dispatch core (deterministic, regulated)                  │
+│   The engines that compute the actual numbers — distance, fuel,     │
+│   ETOPS, MEL, crew FDP, OpsSpecs, PBN. The legal output is here.    │
+└─────────────────────────────────────────────────────────────────────┘
+                                  ▲
+┌─────────────────────────────────────────────────────────────────────┐
+│ LAYER 3 — GAAS AI (re-phrasing, retrieval, memory)                  │
+│   Five per-phase agents read the engines' facts and write the       │
+│   dispatcher-facing narrative. RAG pulls past rejections + tenant   │
+│   memory. Hard rule: agents NEVER invent numbers.                   │
+└─────────────────────────────────────────────────────────────────────┘
+```
 
-The platform serves both passenger-side workflows (search, seat map, booking,
-checkin, gate, coordinator) and staff dispatch workflows (the planner role),
-plus an admin surface for tenant-level configuration.
+**Critical principle**: if Layer 3 is down, Layers 1+2 still work. The release packet has all
+the regulated numbers; only the prose summary is missing. The AI augments — it does not gate.
 
 ---
 
-## 2. What makes AirlineOS GAAS unique
+## 2. The three layers explained
 
-| Aspect | Most flight-planning tools | AirlineOS GAAS |
+### Layer 1 — Multi-tenant SaaS shell
+
+Everything an airline-as-a-customer needs:
+
+| Component | What it does |
+|---|---|
+| `tenants` table | One row per airline. Slug, name, brand colours, logo. |
+| NextAuth + JWT | Sign-in via email/Google, signed JWT carries `tenantSlug` + `role`. |
+| RBAC middleware | `middleware.ts` gates routes by role (admin / flight_planner / gate_manager / etc). |
+| Postgres RLS | Every per-tenant table enforces `tenant_id = current_setting('app.tenant_id')`. |
+| Admin surface | `/admin` lets the airline configure itself without code changes. |
+| Pluggable integrations | Fuel, MEL, crew feeds. Mock / CSV / API+JWT — selectable per tenant. |
+
+You can serve 1 or 100 airlines from the same deployment. Adding a new tenant is a row insert plus
+filling in their config — see §5.
+
+### Layer 2 — Dispatch core
+
+The regulated, deterministic engine that produces the legal artefact (the dispatch release).
+
+The 8-phase OFP workflow:
+
+```
+1. Brief         METAR/TAF/SIGMET/NOTAM digestion + recommendation
+2. Aircraft      Tail / MEL / ETOPS / critical fuel
+3. Route         Filed route, distance, block time, cost index, PBN
+4. Fuel          Trip + contingency + alternate + reserve + taxi (+ tankering)
+5. W&B           Weight & balance, MTOW envelope
+6. Crew          Roster, FDP/FTL, fatigue
+7. Slot/ATC      CTOT, ICAO flight plan
+8. Release       Joint operational control sign-off (FAR 121.533)
+```
+
+Plus seven sub-tools (divert advisor, cascade simulator, tankering, MEL impact, schedule deconflict,
+NOTAM board, SIGMET overlay, fuel-price dashboard, EOD report).
+
+Numbers come from these engines, in `lib/`:
+
+| Engine | File | Computes |
 |---|---|---|
-| AI role | Single chat assistant or none | **Five specialised per-phase agents** with their own prompts + retrieval sets |
-| Numbers | Either deterministic OR LLM-narrated | **Both** — engines compute, agents narrate, hard rule "never invent" |
-| Prior knowledge | Forgotten between flights | **Per-tenant memory + RAG** — past rejections, SOPs, incidents inform every plan |
-| Tenant config | Hardcoded or per-tenant code branch | **Pure config** — OpsSpecs, fleet, MEL, fuel feed, crew, AI memory all editable in admin UI |
-| Vector store | External (Pinecone, Weaviate, etc.) | **In-tenant pgvector** — same Aurora cluster, same RLS, no extra infra |
-| Embeddings | Locked to one provider | **Pluggable** — voyage / openai / mock; swap by env var, no code change |
-| Audit trail | Either logs OR text source | **Both** — every retrieval logged with score, every fact provenance-tagged, FAA-ready |
-| Failure mode | LLM unavailable → error page | **Deterministic engines still run** — agent re-phrasing is decoration, not the answer |
+| Perf table + great-circle | `perf.ts` | Distance, block time, cruise burn, fuel breakdown |
+| ETOPS | `etops.ts` | EP, alternates, critical fuel, cargo fire bound |
+| OpsSpecs loader | `ops-specs.ts` | Per-tenant fuel policy / minima / ETOPS auth / PBN / CI / authorized airports |
+| PBN | `pbn.ts` | Required RNAV/RNP per route, validation against authorization |
+| MEL | `mel.ts` | Restriction evaluation, dispatch legality |
+| Crew | `crew.ts` | Roster, assignments, FDP |
+| Crew fatigue | `crew-fatigue.ts` | 0–100 score from FDP/rest/timezone |
+| TAF parser | `aviationweather.ts` | ETA ±1hr window check vs minima |
+| Aircraft ontology | `shared/semantic/aircraft.ts` | Type / family / perf / ETOPS factors |
 
-The key insight is that **flight dispatch is a regulated activity where the AI must
-augment, not replace, the deterministic engine**. AirlineOS treats LLMs as a
-re-phrasing + retrieval layer that sits *above* a fully working planner, not as
-the planner itself. The dispatch release is the engine's output; the AI's job is
-to make it readable, learn from the dispatcher's rejections, and surface relevant
-prior knowledge.
+### Layer 3 — GAAS AI
 
----
+"GAAS" = Generative AI as a Service. Five specialised agents, one per phase, each with its own prompt
+and retrieval set:
 
-## 3. Installation
+| Agent | Phase | What it writes |
+|---|---|---|
+| `BriefAgent` | brief | Pre-flight WX/NOTAM briefing prose |
+| `RouteAgent` | route | Route narrative + PBN compliance line |
+| `FuelAgent` | fuel | Block-fuel decomposition + tankering note |
+| `AircraftAgent` | aircraft | Tail/MEL/ETOPS narrative — most safety-critical |
+| `ReleaseAgent` | release | Go/no-go synthesis, FAR 121.533 language |
 
-### 3.1 Prerequisites
+Behind them:
 
-- Node.js 22.9+ (or 20.17+)
-- npm 11
-- Postgres 17+ with `pgvector` extension (production); not required for local dev
-- An Anthropic API key (`ANTHROPIC_API_KEY`)
-- Optional: AWS account (Lambda + API Gateway + Aurora Serverless v2 + RDS Proxy + Secrets Manager)
-- Optional: Voyage AI or OpenAI API key (for production-grade embeddings)
+- **RAG** (`lib/ai/rag.ts`) — pulls past rejection comments + SOPs + memory + incidents per call
+- **Memory** (`lib/ai/memory.ts`) — operator-specific facts the airline curates over time
+- **Vector store** (`lib/ai/vector-store.ts`) — pluggable: in-memory (dev) or pgvector (prod)
+- **Embeddings** (`lib/ai/embeddings.ts`) — pluggable: mock / voyage / openai
 
-### 3.2 Local development
-
-```bash
-git clone https://github.com/swapna15/airline-app
-cd airline-app
-npm install
-
-# Minimal .env.local
-cat > .env.local <<'EOF'
-NEXTAUTH_SECRET=<openssl rand -base64 32>
-NEXTAUTH_URL=http://localhost:3000
-ANTHROPIC_API_KEY=sk-ant-...
-EMBEDDING_PROVIDER=mock
-EOF
-
-npm run dev   # → http://localhost:3000
-```
-
-Local dev runs entirely in-process:
-- `MockAdapter` for flights / bookings
-- `lib/planner-store.ts` in-memory map for plans
-- `lib/ai/vector-store.ts` in-memory map for the RAG corpus
-- `MockEmbeddingProvider` for embeddings (deterministic hash-based)
-
-You can sign in with any email — the role is derived from the prefix:
-`admin@…` → admin, `planner@…` → flight_planner, `gate@…` → gate_manager,
-anything else → passenger.
-
-### 3.3 Production deployment
-
-#### 3.3.1 AWS infrastructure (Terraform)
-
-```bash
-cd infra/terraform
-terraform init
-terraform plan -var="frontend_url=https://your-app.vercel.app" \
-               -var="nextauth_secret=$(openssl rand -base64 32)"
-terraform apply
-```
-
-This provisions: VPC + NAT, Aurora Serverless v2, RDS Proxy, Secrets Manager,
-Lambda functions (users, flights, bookings, checkin, gate, admin, planning,
-migrate, authorizer), and API Gateway REST API with JWT authorizer.
-
-#### 3.3.2 Run migrations
-
-```bash
-aws lambda invoke --function-name airline-app-migrate --payload '{}' /tmp/out.json
-cat /tmp/out.json
-# {"applied":["001_schema",...,"012_ai_corpus"], "skipped":[]}
-```
-
-Migration `012_ai_corpus` creates the `vector_documents` and `vector_retrievals`
-tables with pgvector indexing, scoped by `tenant_id` with RLS.
-
-#### 3.3.3 Vercel deployment
-
-```bash
-vercel --prod
-```
-
-Required env vars on Vercel:
-- `NEXTAUTH_SECRET` — must match Lambda's
-- `NEXTAUTH_URL` — your Vercel URL
-- `ANTHROPIC_API_KEY`
-- `NEXT_PUBLIC_API_URL` — the API Gateway URL output by Terraform
-- `EMBEDDING_PROVIDER=voyage` (or `openai`)
-- `VOYAGE_API_KEY` or `OPENAI_API_KEY`
+The agents **augment** the engines. If an agent is rejected by the dispatcher, that rejection
+becomes a memory and informs every future similar plan.
 
 ---
 
-## 4. Configuration for a specific airline (tenant onboarding)
+## 3. Who uses what (personas + pages)
 
-A new airline tenant is fully configured via the admin UI — no code changes.
+### Five personas
 
-### 4.1 Create the tenant record
+| Persona | Role enum | What they do | Where they live in the app |
+|---|---|---|---|
+| Passenger | `passenger` | Book / check-in / boarding pass | `/`, `/results`, `/booking/*`, `/my-bookings` |
+| Check-in agent | `checkin_agent` | PNR lookup, 24h window, bag check | `/checkin` |
+| Gate manager | `gate_manager` | Status FSM, board passenger, manifest | `/gate` |
+| Coordinator | `coordinator` | IROPS recovery, cross-flight rebooking | `/coordinator` |
+| Flight planner / dispatcher | `flight_planner` | Build OFP, sign release, run sub-tools | `/planner`, `/planner/*` |
+| Admin | `admin` | Configure the tenant | `/admin`, `/admin/*` |
 
-In Postgres (via the admin UI or directly):
+In local dev, role is derived from the email prefix (`admin@…` → admin, `planner@…` → planner).
+In production, role is set in the `users.role` column and propagated via JWT.
+
+### Page-by-page (the planner role)
+
+| Page | What it does | Layer |
+|---|---|---|
+| `/planner` | 8-phase per-flight stepper | 2 + 3 |
+| `/planner/divert` | Alternate ranking with C055 + ETOPS + TAF window + authorizedAirports | 2 |
+| `/planner/cascade` | Delay propagation through fleet rotations | 2 |
+| `/planner/tankering` | Origin vs dest fuel-price tankering decision | 2 |
+| `/planner/mel` | MEL conflict detection, dispatch legality | 2 |
+| `/planner/deconflict` | 8 conflict types: maintenance, FDP, rest, double-book, … | 2 |
+| `/planner/notams` | Categorised NOTAM board with severity | 2 |
+| `/planner/sigmet` | World-map polygon overlay | 2 |
+| `/planner/fuel-prices` | Per-airport price dashboard, CSV export | 2 |
+| `/planner/eod` | End-of-day roll-up | 2 |
+
+### Page-by-page (the admin role)
+
+| Page | What they configure | Block of OpsSpec |
+|---|---|---|
+| `/admin` | Roster of users, roles, basic stats | — |
+| `/admin/integrations` | Fuel-price / MEL / crew feed sources | — |
+| `/admin/dispatcher-certs` | FAA / FOO certs, area + type quals, currency | — |
+| `/admin/ops-specs` | Fuel policy / alt minima / ETOPS / PBN / CI / authorized airports | A030, A032, B044, C055, C063, B036 |
+| `/admin/ai/memory` | **GAAS facts the agents retrieve via RAG** | (Layer 3) |
+
+---
+
+## 4. Multi-tenancy — how SaaS works here
+
+### What "tenant" means
+
+A tenant is one airline customer. It owns:
+
+- Its own row in `tenants` (slug, brand)
+- Its own users (`users.tenant_id`)
+- Its own flights, bookings, plans, reviews, certs, OpsSpecs, integration configs, AI memory
+
+Two airlines on the same deployment never see each other's data. Enforcement is at three layers:
+
+### How isolation is enforced
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. JWT — every request carries tenantSlug in the signed token   │
+│    NextAuth issues; API Gateway authorizer Lambda verifies.     │
+└─────────────────────────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. App-level resolver — shared/tenant.ts maps slug → UUID and   │
+│    sets `app.tenant_id` on the Postgres session per request.    │
+└─────────────────────────────────────────────────────────────────┘
+                             │
+                             ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. RLS policies — every per-tenant table has                    │
+│      USING (tenant_id = current_setting('app.tenant_id')::uuid) │
+│    Postgres rejects cross-tenant SELECT/UPDATE/DELETE silently. │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+So even if a Lambda forgets to filter by `tenant_id`, the database physically refuses to return
+another tenant's rows.
+
+### What's per-tenant vs shared
+
+| Per-tenant (RLS) | Shared (no tenant_id) |
+|---|---|
+| `tenants` (the row itself) | `airports` (~3,400 ICAO codes) |
+| `users` | `airlines` (carrier registry) |
+| `flights` | `aircraft_types` (ontology — code-resident) |
+| `bookings` | `firs` (ontology — code-resident) |
+| `flight_plans` + `flight_plan_reviews` | Anthropic / Voyage API (external) |
+| `dispatcher_certifications` | AviationWeather / FAA NOTAM (external) |
+| `ops_specs` | |
+| `integration_configs` | |
+| `vector_documents` (RAG corpus) | |
+| `vector_retrievals` (audit log) | |
+
+---
+
+## 5. Complete feature inventory
+
+This is the exhaustive list — every page, every API, every Lambda, every agent, every database table, every script. Each item links to where it's documented in depth (or stays here as a one-liner if it's small).
+
+### 5.1 Passenger surface (the booking funnel)
+
+| Feature | Page | What it does |
+|---|---|---|
+| Landing search | `/` (`app/page.tsx`) | Origin/destination/date form, single-trip vs round-trip, passenger count, cabin class. Submit → `/search/results`. |
+| Natural-language search | Same page (Claude assistant button) | Free-form prompt → `SearchAgent` parses → flight search query |
+| Search results | `/search/results` | Round-trip-aware, filterable, sortable. Shows price, layover, aircraft type, carrier brand |
+| Flight detail / seat map | `/booking/seats?flightId=...` | Interactive seat-map (`components/SeatMap.tsx`) with class fences and price upgrade |
+| Passenger details | `/booking/passengers` | Per-pax name/passport, contact info |
+| Checkout | `/booking/checkout` | Price breakdown + ancillaries (bags, seat upgrade, lounge) |
+| Confirmation | `/booking/confirmation` | PNR, e-ticket, calendar add, boarding pass preview |
+| My bookings | `/my-bookings` | List active + past bookings |
+| Booking detail | `/bookings/[pnr]` | View, cancel, modify (where allowed) |
+| Public booking lookup | `/bookings` | PNR + last-name lookup (no login) |
+| Recommendation upsell | Inline on results | `RecommendationAgent` proposes seat upgrade / loyalty offer / bundle |
+| Customer support FAQ | Floating chat (`ClaudeAssistant`) | `SupportAgent` answers tenant-policy questions (cancel, baggage) |
+| Disruption advice | Inline if delay/cancel detected | `DisruptionAgent` proposes rebook options + compensation rights |
+| Booking state continuity | All booking pages | `utils/bookingStore.tsx` (React Context + localStorage) — refresh-safe |
+| Email notifications | Server-side | `/api/email/booking-confirmation` and `/api/email/booking-cancellation` |
+| Sign-in / sign-up | `/login`, `/register` | NextAuth credentials + Google OAuth |
+
+### 5.2 Staff surfaces (operational pages)
+
+| Page | Role | Feature inventory |
+|---|---|---|
+| `/checkin` | checkin_agent | PNR/name lookup, 24h window enforcement, bag count, boarding-group assignment, auto-print boarding pass |
+| `/gate` | gate_manager | Flight list with status pills (Boarding/Departed/Delayed), per-flight detail with manifest, status FSM transitions (Scheduled → Boarding → Departed), individual passenger board action, total/checkedIn/boarded counters |
+| `/coordinator` | coordinator | IROPS recovery: cross-flight rebooking dashboard, shows passengers stranded by cancellation, propose alternates from same-day rotation |
+| `/planner` | flight_planner | The full 8-phase per-flight stepper (see §7.1) |
+| `/planner/batch` | flight_planner | Schedule-wide batch planning across today's rotation |
+| `/planner/divert` | flight_planner | Diversion advisor (see §7.6) |
+| `/planner/cascade` | flight_planner | Delay propagation simulator |
+| `/planner/tankering` | flight_planner | Tankering decision tool |
+| `/planner/mel` | flight_planner | MEL impact assessment |
+| `/planner/deconflict` | flight_planner | Schedule deconfliction (8 conflict types) |
+| `/planner/notams` | flight_planner | NOTAM briefing board |
+| `/planner/sigmet` | flight_planner | World-map polygon SIGMET overlay |
+| `/planner/fuel-prices` | flight_planner | Per-airport fuel price dashboard with CSV export |
+| `/planner/eod` | flight_planner | End-of-day operational roll-up report |
+
+### 5.3 Admin surfaces (tenant configuration)
+
+| Page | What admins control |
+|---|---|
+| `/admin` | Tenant overview, user list with role pills (filter by role), user role updates, soft-delete, basic stats (revenue, bookings, on-time %) |
+| `/admin/integrations` | Per-tenant feeds: select provider (mock / CSV / API+JWT) for fuel-prices, MEL, crew. Test-connection button hits provider's healthCheck. |
+| `/admin/dispatchers` | Roster of dispatchers, per-dispatcher cert details, area qualifications (`[userId]/areas`), type qualifications (`[userId]/types`), §121.463(c) currency dates |
+| `/admin/ops-specs` | All seven OpsSpec blocks (see §6 step 3 / §10.1) |
+| `/admin/ai/memory` | Per-tenant AI memory facts (scope / title / body / tags) |
+| Tenant brand config | (Set on `tenants` table) | Primary colour, logo URL, name, AI personality, supported languages, loyalty programme on/off |
+
+### 5.4 The ten agents
+
+Six are wired through the planner workflow (one orchestrator, five specialised); four serve passenger flows.
+
+| Agent | File | Where used |
+|---|---|---|
+| `BriefAgent` | `core/agents/planning/BriefAgent.ts` | `brief` phase — METAR/TAF/SIGMET/NOTAM digestion |
+| `RouteAgent` | `core/agents/planning/RouteAgent.ts` | `route` phase — distance/CI/PBN narrative |
+| `FuelAgent` | `core/agents/planning/FuelAgent.ts` | `fuel` phase — block-fuel decomposition + tankering |
+| `AircraftAgent` | `core/agents/planning/AircraftAgent.ts` | `aircraft` phase — tail/MEL/ETOPS narrative |
+| `ReleaseAgent` | `core/agents/planning/ReleaseAgent.ts` | `release` phase — go/no-go synthesis |
+| `PlanningAgent` (legacy) | `core/agents/PlanningAgent.ts` | Kept for back-compat; will be removed once all phases migrated to per-phase agents |
+| `SearchAgent` | `core/agents/SearchAgent.ts` | Natural-language flight search query parsing |
+| `RecommendationAgent` | `core/agents/RecommendationAgent.ts` | Upsell / bundle / loyalty recommendations |
+| `SupportAgent` | `core/agents/SupportAgent.ts` | Customer support FAQ scoped to tenant policies |
+| `DisruptionAgent` | `core/agents/DisruptionAgent.ts` | Delay / cancellation recovery advice |
+
+All agents extend `BaseAgent` (`core/agents/base.ts`) which:
+- Uses `claude-sonnet-4-6` by default
+- Substitutes `{airline}` from the tenant brand
+- Appends tone (formal / friendly / concise) per `tenant.aiPreferences.tone`
+- Injects cancellation + baggage policies from tenant config
+- Adds passenger personalisation (preferred cabin / seat / frequent routes) when context carries it
+
+The planning agents extend `PlanningBaseAgent` which adds RAG retrieval + audit metadata.
+
+### 5.5 Adapter pattern (multi-source flight data)
+
+`core/adapters/` abstracts flight search / seat map / booking CRUD behind one `AirlineAdapter` interface (`core/adapters/types.ts`). Selection logic in `core/adapters/registry.ts`:
+
+| Adapter | When | What it does |
+|---|---|---|
+| `MockAdapter` (`core/adapters/mock/`) | `NEXT_PUBLIC_API_URL` and `DUFFEL_ACCESS_TOKEN` both unset | In-memory deterministic flights for dev |
+| `DuffelAdapter` (`core/adapters/duffel/`) | `DUFFEL_ACCESS_TOKEN` set, `NEXT_PUBLIC_API_URL` unset | Real flight inventory via `@duffel/api`; supports order placement |
+| Real Lambda backend | `NEXT_PUBLIC_API_URL` set | Forwards to API Gateway → Lambda → Aurora |
+
+`AdapterRegistry` allows per-tenant adapter selection (a tenant could be on Duffel, another on a custom GDS feed).
+
+### 5.6 Pluggable enterprise integrations
+
+Three domains, each with the same provider-pattern (mock / CSV / API+JWT). Files in `lib/integrations/`:
+
+| Domain | Provider modes | Public façade |
+|---|---|---|
+| Fuel prices | `mock`, `csv`, `api_fms` | `lib/fuelprices.ts` |
+| MEL deferrals | `mock`, `csv`, `api_amos`, `api_trax`, `api_camo` | `lib/mel.ts` |
+| Crew (roster + assignments) | `mock`, `csv`, `api_sabre`, `api_jeppesen`, `api_aims` | `lib/crew.ts` |
+
+Shared utilities (`lib/integrations/`):
+- `types.ts` — `Provider` interface (`name`, `healthCheck()`, optional `refresh()`)
+- `fetcher.ts` — URI-scheme dispatch: `s3://`, `file://`, `https://`. S3 uses opaque dynamic import so `@aws-sdk/client-s3` is only required when actually used
+- `cache.ts` — TTL cache attached to `globalThis`, request-coalescing in-flight promises (HMR-safe)
+- `csv.ts` — RFC-4180 CSV parser
+- `secrets.ts` — secret reference resolver: `env://VAR` / `secretsmanager:arn:…` / verbatim
+- `config-store.ts` — process-scoped persistent integration config (HMR-safe `globalThis` Map). Resolvers consult store first, fall back to env vars
+
+Reference scripts:
+- `scripts/sample-fuel-prices.csv`, `scripts/mock-fms-api.mjs` (port 4000)
+- `scripts/sample-mel-deferrals.csv`, `scripts/mock-mis-api.mjs` (port 4001)
+- `scripts/sample-crew-roster.csv`, `scripts/sample-crew-assignments.csv`, `scripts/mock-crew-api.mjs` (port 4002)
+
+### 5.7 Reference data + ontologies
+
+| Source | File(s) | Records | Purpose |
+|---|---|---|---|
+| Airports | `lib/icao.ts` + `lib/airports.json` | ~3,400 | Every large/medium ICAO airport with paved runway ≥ 6,000 ft |
+| Airport import | `scripts/import-ourairports.mjs` | — | Joins OurAirports `airports.csv` + `runways.csv` + verified-data supplements |
+| Verified-data supplements | `scripts/airport-supplements.json` | ~500 | Real fireCat / customs24h / fuelTypes for top busiest; flagged `dataQuality: 'verified'` |
+| Aircraft ontology | `shared/semantic/aircraft.ts` | 24+ types | ICAO/IATA/marketing/family/aliases + perf + ETOPS factors |
+| Airline ontology | `shared/semantic/airline.ts` | 25+ carriers | ICAO/IATA/callsign + alliance + hubs |
+| FIR ontology | `shared/semantic/fir.ts` | 60+ FIRs | CONUS ARTCCs + oceanic centres + European/Asian/Pacific |
+| Demo fleet | `lib/fleet.ts` | mocked tail rotations | Replace with fleet adapter in prod |
+
+### 5.8 Components inventory
+
+`components/`:
+
+| Component | Purpose |
+|---|---|
+| `AirlineLogo.tsx` | Tenant-aware branded carrier logo |
+| `AutoPrepareProgress.tsx` | NDJSON-streamed live phase progress for batch planning |
+| `ClaudeAssistant.tsx` | Floating freeform Claude chat (passenger surface) |
+| `FlightCard.tsx` | Flight result row (passenger + planner reuse) |
+| `Navbar.tsx` | Role-aware nav (different links per role, role badge) |
+| `PlannerTabs.tsx` | Tab strip across all `/planner/*` sub-tools |
+| `PriceSummary.tsx` | Booking price breakdown |
+| `SeatMap.tsx` | Interactive seat selector with class fences |
+| `SigmetMap.tsx` | Leaflet world map for SIGMET overlay |
+
+### 5.9 Database schema (every migration)
+
+`infra/db/migrations/`:
+
+| Migration | What it adds |
+|---|---|
+| `001_schema.sql` | Base: airports, airlines, users, flights, seats, bookings |
+| `002_seed.sql` | 10 airports, 10 airlines, 5 demo users, 6 sample flights with full seat inventory |
+| `003_multi_tenant.sql` | `tenants` table + RLS policies on per-tenant tables |
+| `003_refresh_flight_dates.sql` | Idempotent ad-hoc data refresh — moves seeded flight dates forward (not in tracked list) |
+| `004_flight_plans.sql` | `flight_plans` + `flight_plan_reviews` |
+| `005_integration_configs.sql` | Per-tenant integration configs (provider + URL + token-ref) |
+| `006_add_flight_planner_user.sql` | Adds `flight_planner` role + demo user |
+| `007_flight_plans_text_id.sql` | Relax `flight_id` to TEXT (transitional) |
+| `008_flight_plans_uuid_id.sql` | Restore `flight_id` to UUID + FK once real UUIDs flow |
+| `009_dispatcher_certifications.sql` | Cert table + currency dates + RLS |
+| `010_ops_specs.sql` | OpsSpecs table — 7 JSONB blocks, RLS, per-tenant default seed |
+| `011_pbn_oceanic_defaults.sql` | Backfill RNP-4 + RNP-10 onto existing tenants (idempotent) |
+| `012_ai_corpus.sql` | pgvector extension, `vector_documents` (1024-dim, IVFFlat cosine), `vector_retrievals` audit log, RLS |
+
+### 5.10 Backend Lambdas
+
+`infra/lambdas/`:
+
+| Lambda | Routes | Purpose |
+|---|---|---|
+| `authorizer/` | (Token Authorizer) | Validates NextAuth JWT using `NEXTAUTH_SECRET`, injects `{userId, email, role, tenantSlug}` into API GW request context |
+| `users/` | register, login, get-user, update-role | bcrypt hashing, NextAuth-compatible JWT issue |
+| `flights/` | search, get-flight, seat-map, /flights/own-today | Round-trip-aware search filtered by available seats; `own-today` returns the carrier's flights with resolved aircraft ICAO via the ontology |
+| `bookings/` | create, list, get, cancel | Reserves seats, generates PNR, releases on cancel |
+| `checkin/` | lookup, check-in, boarding-pass, flight-checkin-list | 24h window enforced |
+| `gate/` | flight list/detail, status-FSM transitions, board passenger, manifest | |
+| `admin/` | stats, paginated user/flight management, role update, soft-delete | |
+| `dispatchers/` | get/upsert certs, areas, types, currency | Backed by migration 009 |
+| `integrations/` | per-tenant config CRUD, ops-specs CRUD, vector store endpoints (scaffold) | |
+| `planning/` | flight plan CRUD + review audit + EOD aggregator + Phase-D rejection-comments retrieval | |
+| `migrate/` | Idempotent migration runner with `schema_migrations` table | |
+| `shared/` | `db.ts` (singleton pg.Pool via RDS Proxy + Secrets Manager), `response.ts` (CORS helpers), `tenant.ts` (slug → UUID + RLS setting) | |
+
+### 5.11 Next.js API routes (the bridge layer)
+
+`app/api/`:
+
+| Route | Behaviour |
+|---|---|
+| `/api/auth/[...nextauth]` | NextAuth handlers (credentials + Google) |
+| `/api/auth/register` | Registers a user via Lambda or local mock |
+| `/api/agents` | Routes intent → orchestrator (search / recommend / support / disrupt) |
+| `/api/claude` | Direct Anthropic proxy for `ClaudeAssistant` |
+| `/api/airports/suggest` | Typeahead for ICAO/IATA |
+| `/api/duffel/orders` | Place real bookings via Duffel |
+| `/api/email/booking-confirmation` | Server-side email send |
+| `/api/email/booking-cancellation` | Server-side email send |
+| `/api/flights/*` | Bridge to Lambda; fall back to mock |
+| `/api/flights/own` | Carrier's own scheduled flights for the planner |
+| `/api/bookings/*` | Bridge to Lambda; fall back to mock |
+| `/api/tenant/*` | Tenant brand + AI preferences config |
+| `/api/planner/[phase]` | Per-phase dispatcher (calls `runAgent`) |
+| `/api/planner/plans/[flightId]` | Plan CRUD + reviews append |
+| `/api/planner/auto-prepare` + `[runId]` | NDJSON-streamed batch planning |
+| `/api/planner/divert` | Divert advisor (engines + agent narrative) |
+| `/api/planner/cascade` | Delay cascade |
+| `/api/planner/tankering` | Tankering decision |
+| `/api/planner/mel` | MEL impact |
+| `/api/planner/deconflict` | Schedule deconfliction |
+| `/api/planner/notams` | Categorised NOTAM board |
+| `/api/planner/sigmet` | SIGMET feed + classification |
+| `/api/planner/fuel-prices` | Fuel-price dashboard data |
+| `/api/planner/eod` | End-of-day roll-up |
+| `/api/admin/dispatchers/*` | Cert + currency CRUD |
+| `/api/admin/ops-specs` | OpsSpecs CRUD |
+| `/api/admin/integrations/[kind]` + `[kind]/test` | Integration config CRUD + test-connection |
+| `/api/admin/ai/memory` | GAAS memory facts CRUD |
+| `/api/debug/auth` | Dev-only: dump session + JWT for debugging |
+
+### 5.12 Tenant config schema
+
+`types/tenant.ts` defines the per-tenant config the agents consume. Editable via `/api/tenant/[tenantId]`:
+
+```jsonc
+{
+  "brand": {
+    "name": "Aerospica Airlines",
+    "primaryColor": "#0A2342",
+    "logoUrl": "https://..."
+  },
+  "aiPreferences": {
+    "tone": "formal",                    // formal | friendly | concise
+    "agentPersonality": "Senior dispatcher voice. Lead with operational impact.",
+    "supportedLanguages": ["en", "es"],
+    "cancellationPolicyText": "Refundable up to 24h before departure...",
+    "baggagePolicyText": "1 carry-on + 1 checked included; extra bags $50."
+  },
+  "policies": {
+    "pricing": { "markupPercent": 0 }
+  },
+  "features": {
+    "loyaltyProgram": true
+  }
+}
+```
+
+The `BaseAgent` injects all of this into every prompt — every tenant's agents speak in the tenant's voice, scoped to the tenant's policies.
+
+### 5.13 Auto-prepare workflow (live-streamed batch planning)
+
+A planner can click **Auto-prepare** on `/planner` to run all 7 prep phases for a single flight, or hit `/planner/batch` to run them across the schedule. The endpoint streams progress over NDJSON (`{phase, status, summary}` lines) and the UI updates phase-by-phase via `components/AutoPrepareProgress.tsx`. After completion the planner reviews each phase and approves or rejects; rejections feed back into the GAAS memory.
+
+### 5.14 Email subsystem
+
+`/api/email/booking-*` route handlers send transactional emails via Resend (or SES, swap by env). Templates inline.
+
+### 5.15 NextAuth + role system
+
+`auth.ts` with two providers:
+- **Credentials** — email/password, hashes via bcrypt (Lambda) or local-dev shortcut by email prefix
+- **Google OAuth** — when `GOOGLE_CLIENT_ID` + `GOOGLE_CLIENT_SECRET` set
+
+Custom `jwt.encode` / `jwt.decode` callbacks using `jose` HS256 — required because the Lambda authorizer uses `jsonwebtoken.verify` which only handles JWS, not the JWE that NextAuth defaults to.
+
+Six roles in `types/roles.ts`: `passenger`, `checkin_agent`, `gate_manager`, `coordinator`, `flight_planner`, `admin`. `ROUTE_ROLES` in `middleware.ts` gates every staff page. The `Navbar` renders different links per role and a role badge.
+
+### 5.16 Test infrastructure
+
+`__tests__/`:
+
+| Suite | Convention | What |
+|---|---|---|
+| `__tests__/integration/` | `@jest-environment node` | Calls Next.js route handlers directly via `NextRequest` |
+| `__tests__/unit/` | jsdom default | Component + utility tests |
+| Coverage thresholds | 70% branches, 80% lines/functions/statements | From `core/`, `components/`, `utils/mockData.ts`, `app/search/`, three API routes |
+| Anthropic SDK mock | Self-contained static pattern (in factory) | Avoids jest hoisting TDZ |
+
+Run:
+```bash
+npm test                          # all
+npm run test:watch                # watch
+npm run test:coverage             # with thresholds
+npx jest --testPathPattern=Form   # single file
+NODE_ENV=test npx jest --runInBand  # CI mode
+```
+
+### 5.17 CI/CD
+
+`.github/workflows/deploy.yml`:
+
+| Job | Trigger | What |
+|---|---|---|
+| `test` | (currently commented out) | Jest with coverage thresholds |
+| `infra` | Push to `main` | `terraform apply` against AWS |
+| `frontend` | Push to `main` | `vercel --prod` |
+
+Vercel additionally builds on every PR for preview URLs.
+
+### 5.18 Custom Claude Code skills
+
+`.claude/commands/`:
+- `/add-airline` — scaffolds a new airline adapter into `core/adapters/`
+- `/run-agent` — invokes an agent intent against the local dev server
+
+### 5.19 Branding + multi-brand UI
+
+Tenant brand fields (`tenants.brand_primary_color`, `brand_logo_url`, `name`) drive:
+- `Navbar` colour accent + logo
+- `AirlineLogo` component substitution
+- Email template colours + logo
+- Booking confirmation page brand
+- Agent system prompts ("{airline}" placeholder replaced)
+
+A future "white-label domain" feature would map `aerospica.airlineos.app` → `tenant_id=aerospica` automatically — not yet built.
+
+### 5.20 Demo data
+
+`utils/mockData.ts` exposes a deterministic 50-flight schedule, 10 carriers, 10 airports for the passenger surface when no backend is configured. Used by tests and local dev. Seed migration `002_seed.sql` populates the same shape into Postgres.
+
+---
+
+## 6. Onboarding a new airline (end-to-end walkthrough)
+
+The full lifecycle from "Aerospica Airlines wants in" to "they're dispatching flights".
+
+### Step 1 — Provision the tenant row
+
+Either via SQL or a future provisioning UI:
 
 ```sql
 INSERT INTO tenants (slug, name, brand_primary_color, brand_logo_url)
 VALUES ('aerospica', 'Aerospica Airlines', '#0A2342', 'https://...');
 ```
 
-Migration 010 auto-seeds default OpsSpecs for any tenant without one.
+Migration `010_ops_specs` automatically seeds default OpsSpecs for any new tenant on first
+admin visit, so they have a working baseline.
 
-### 4.2 Configure OpsSpecs (`/admin/ops-specs`)
+### Step 2 — Create their first admin user
 
-The seven blocks the planner consumes:
+```sql
+INSERT INTO users (id, tenant_id, email, password_hash, role)
+SELECT gen_random_uuid(), id, 'ops@aerospica.com', '<bcrypt>', 'admin'
+FROM tenants WHERE slug = 'aerospica';
+```
 
-| Block | OpsSpec ref | What to set | Used by |
-|---|---|---|---|
-| Fuel policy | — | contingency %, alternate min, reserve min, taxi kg | fuel phase |
-| Alternate minima | C055 | destination + alternate ceiling/vis | divert advisor, brief |
-| ETOPS approval | B044 | maxMinutes, authorizedTypes | aircraft phase |
-| PBN authorizations | C063 / B036 | RNAV + RNP levels you're approved for | route phase |
-| Cost index | — | default + per-type overrides | route phase |
-| Authorized airports | A030 / A032 | ICAO list, empty = no restriction | divert + brief |
-| Notes | — | free-form admin notes | display only |
+That admin signs in. JWT carries `tenantSlug='aerospica'`, `role='admin'`. They land on `/admin`.
 
-### 4.3 Wire integrations (`/admin/integrations`)
+### Step 3 — Configure OpsSpecs (`/admin/ops-specs`)
 
-Three pluggable per-tenant feeds — all support **mock** / **CSV** / **API+JWT**:
+Seven blocks. Concrete JSON for a long-haul widebody operator:
 
-| Domain | Resolver env | Endpoint env |
-|---|---|---|
-| Fuel prices | `FUEL_PRICE_PROVIDER` (mock\|csv\|api_fms) | `FUEL_PRICE_API_URL` + `FUEL_PRICE_API_TOKEN` |
-| MEL deferrals | `MEL_PROVIDER` (mock\|csv\|api_amos\|api_trax\|api_camo) | `MEL_API_URL` + `MEL_API_TOKEN` |
-| Crew | `CREW_PROVIDER` (mock\|csv\|api_sabre\|api_jeppesen\|api_aims) | `CREW_API_ROSTER_URL` + `CREW_API_ASSIGNMENTS_URL` + `CREW_API_TOKEN` |
+```jsonc
+{
+  "fuelPolicy": {
+    "contingencyPct": 5,                  // % of trip fuel
+    "alternateMinutes": 45,               // minutes at cruise burn
+    "finalReserveMinutes": 30,            // 30 EU / 45 FAA domestic
+    "taxiKg": 600,                        // flat
+    "captainsFuelMinutes": 0,             // discretionary
+    "tankeringEnabled": true
+  },
+  "alternateMinima": {                    // OpsSpec C055
+    "destinationCeilingFt": 2000, "destinationVisSm": 3,
+    "alternateCeilingFt": 600,   "alternateVisSm": 2
+  },
+  "etopsApproval": {                      // OpsSpec B044
+    "maxMinutes": 180,
+    "authorizedTypes": ["B77W", "B789", "A333", "A359"]
+  },
+  "pbnAuthorizations": {                  // OpsSpec C063 / B036
+    "rnavLevels": ["RNAV-1", "RNAV-2", "RNAV-5"],
+    "rnpLevels":  ["RNP-2", "RNP-4", "RNP-10", "RNP-AR"]
+  },
+  "costIndex": {
+    "default": 30,
+    "byType": { "B77W": 25, "A388": 40 }
+  },
+  "authorizedAirports": [],               // empty = no restriction
+  "notes": "Updated post Q4 2025 fuel review"
+}
+```
 
-Token references can use `env://VAR` or `secretsmanager:arn:…`.
+Each block flows immediately into planner behaviour (no deploy):
 
-### 4.4 Provision dispatcher certificates (`/admin/dispatcher-certs`)
+- `fuelPolicy` → `fuel` phase
+- `alternateMinima` → `divert` advisor + `brief`
+- `etopsApproval` → `aircraft` phase
+- `pbnAuthorizations` → `route` phase (rejects routes requiring unauthorized specs)
+- `costIndex` → `route` phase summary
+- `authorizedAirports` → `divert` (filter) + planner-level destination warning
 
-Per-dispatcher: certificate number, areas of operation, type qualifications,
-§121.463(c) currency dates, license expiry, medical, line check. The release
-phase blocks if the calling dispatcher isn't current for the route's area or
-the assigned aircraft type.
+### Step 4 — Wire integrations (`/admin/integrations`)
 
-### 4.5 Seed the AI memory (`/admin/ai/memory`) — new in this PR
+For each of three domains the airline picks **mock**, **CSV**, or **API+JWT**:
 
-This is where the GAAS layer learns about your operation. Add facts the planning
-agents should know:
+#### Fuel prices
+```
+FUEL_PRICE_PROVIDER       = api_fms
+FUEL_PRICE_API_URL        = https://fms.aerospica.internal/jet-a-prices
+FUEL_PRICE_API_AUTH_METHOD= bearer
+FUEL_PRICE_API_TOKEN      = secretsmanager:arn:aws:secretsmanager:…:fms-token
+```
+
+#### MEL deferrals
+```
+MEL_PROVIDER = api_amos
+MEL_API_URL  = https://mis.aerospica.internal/deferrals
+MEL_API_TOKEN= env://MEL_AMOS_TOKEN
+```
+
+#### Crew (roster + assignments — independent feeds)
+```
+CREW_PROVIDER             = api_sabre
+CREW_API_ROSTER_URL       = https://crew.aerospica.internal/roster
+CREW_API_ASSIGNMENTS_URL  = https://crew.aerospica.internal/pairings
+CREW_API_TOKEN            = env://CREW_SABRE_TOKEN
+```
+
+Token references support `env://VAR` (env var) or `secretsmanager:arn:…` (AWS Secrets Manager).
+Click **Test connection** in the UI to validate before saving.
+
+### Step 5 — Provision dispatcher certificates (`/admin/dispatcher-certs`)
+
+Per-dispatcher row:
+
+```jsonc
+{
+  "userId": "...",
+  "certNumber": "FAA-DX-1234567",
+  "issuedAt": "2018-06-01",
+  "areasOfOperation": ["KZNY", "EGTT", "EISN", "BIRD"],
+  "typeQualifications": ["B77W", "B789"],
+  "lastAreaFamiliarizationAt": "2025-09-15",  // §121.463(c) currency
+  "medicalExpiresAt": "2026-12-31",
+  "lineCheckExpiresAt": "2026-06-30",
+  "status": "active"
+}
+```
+
+The release phase blocks dispatch if the calling dispatcher isn't current for the route's
+area or the assigned aircraft type.
+
+### Step 6 — Seed AI memory (`/admin/ai/memory`)
+
+The GAAS layer's per-tenant knowledge. Each fact the airline adds becomes a vector embedding
+that surfaces during planning. Real examples:
 
 ```
 Scope: fuel
-Title: Tankering threshold raised after Q3 2025 fuel volatility
-Body: Internal policy is to recommend tankering only when projected saving
-exceeds USD 400 (raised from USD 200) since OPEC+ Q3 cuts.
-Tags: tankering, policy
+Title: Tankering threshold raised post Q3 2025
+Body:  Internal policy raised the recommend-tanker threshold from $200
+       to $400 saving after OPEC+ Q3 2025 cuts increased volatility.
+Tags:  tankering, policy
 ```
 
-Each fact is embedded and surfaces during the matching phase when semantically
-similar to the current flight. Scopes: `general`, `brief`, `route`, `fuel`,
-`aircraft`, `crew`, `release`.
+```
+Scope: aircraft
+Title: G-XLEK known galley APU bleed quirk
+Body:  This tail historically shows MEL-deferrable galley bleed faults
+       on long-haul departures from MUC. Plan +200 kg captain's fuel.
+Tags:  G-XLEK, mel
+```
+
+```
+Scope: brief
+Title: Volcanic ash advisory near Iceland
+Body:  KEF/BIRK affected April–June by Eyjafjallajökull-area ash plumes.
+       Always cross-check VAAC bulletins for any Reykjavik FIR transit.
+Tags:  vaac, oceanic
+```
+
+Facts are pulled by the relevant agent **only** when semantically close to the current flight.
+
+### Step 7 — Create flight planner users
+
+Same as step 2 but `role = 'flight_planner'`. They sign in and land on `/planner`. The new
+tenant is now operational.
+
+### What changed without a code deploy
+
+Steps 3–6 are all pure config. The tenant is operating with their own:
+- Fuel policy
+- Alternate minima
+- ETOPS auth + authorized types
+- PBN auth (route validator gates them)
+- Cost index per type
+- Authorized airports list
+- Live fuel-price feed
+- Live MEL feed
+- Live crew feed
+- Dispatcher certs gating release
+- Operator-specific AI memory
+
+All keyed by `tenant_id`, all isolated by RLS.
 
 ---
 
-## 5. Application features
+## 7. Dispatch core — what the engines compute
 
-### 5.1 Passenger surface
-- Natural-language flight search (powered by `SearchAgent`)
-- Round-trip aware results, seat map, booking, checkout, my-bookings
-- Recommendation upsell via `RecommendationAgent`
-- Customer support FAQ via `SupportAgent`
-- Disruption advice via `DisruptionAgent`
+### 6.1 Phase 1: Brief
 
-### 5.2 Staff surfaces
+Inputs: origin/destination ICAOs, time.
 
-| Page | Role | Feature |
-|---|---|---|
-| `/checkin` | checkin_agent | PNR/name lookup, 24h window, boarding pass, manifest |
-| `/gate` | gate_manager | Status FSM transitions, board passenger, manifest |
-| `/coordinator` | coordinator | Cross-flight rebooking, IROPS recovery |
-| `/planner` | flight_planner | 8-phase OFP stepper |
-| `/planner/divert` | flight_planner | Alternate ranking with C055 minima, authorizedAirports filter, ETOPS, TAF ETA-window check |
-| `/planner/cascade` | flight_planner | Delay propagation through fleet rotations |
-| `/planner/tankering` | flight_planner | Origin vs dest fuel-price differential, MTOW-aware |
-| `/planner/mel` | flight_planner | Per-tail MEL conflict detection, dispatch legality |
-| `/planner/deconflict` | flight_planner | 8 conflict types: maintenance, FDP, rest, double-booking |
-| `/planner/notams` | flight_planner | Categorised NOTAM board with severity |
-| `/planner/sigmet` | flight_planner | World-map polygon overlay, route intersection |
-| `/planner/fuel-prices` | flight_planner | Per-airport price dashboard, CSV export |
-| `/planner/eod` | flight_planner | End-of-day roll-up |
-| `/admin` | admin | Stats, user mgmt, role updates |
-| `/admin/ops-specs` | admin | Seven OpsSpec blocks |
-| `/admin/integrations` | admin | Per-tenant pluggable feeds |
-| `/admin/dispatcher-certs` | admin | FAA / FOO certs + currency |
-| `/admin/ai/memory` | admin | **GAAS memory facts (new)** |
+Engines called:
+- `aviationweather.gov` — METAR / TAF / international SIGMET feed
+- FAA NOTAM Search API (or mock when `FAA_CLIENT_*` unset)
+- BriefAgent re-phrases + flags + RAG-retrieves rejections/SOPs
 
-### 5.3 Deterministic engines (the regulatory core)
+Output: 120-word briefing prose ending with `RECOMMEND: <go | hold | divert planning>`.
 
-| Engine | File | What it computes |
-|---|---|---|
-| Fuel | `lib/perf.ts` | Trip + contingency + alternate + reserve + taxi + captains |
-| ETOPS | `lib/etops.ts` | EP, alternates within bound, critical fuel, cargo fire suppression cap |
-| OpsSpecs | `lib/ops-specs.ts` | Per-tenant policy loader |
-| PBN | `lib/pbn.ts` | RNAV/RNP requirements derivation + authorization validation |
-| Aircraft ontology | `shared/semantic/aircraft.ts` | Canonical type resolution + perf + ETOPS factors |
-| Airline ontology | `shared/semantic/airline.ts` | ICAO/IATA/callsign/alias resolver |
-| FIR ontology | `shared/semantic/fir.ts` | 60+ FIRs for SIGMET / oceanic detection |
-| TAF parser | `lib/aviationweather.ts` | ETA ±1hr window check vs C055 minima |
-| MEL | `lib/mel.ts` | Restriction evaluation, dispatch legality |
-| Crew | `lib/crew.ts` | Roster, assignments, FDP |
-| Crew fatigue | `lib/crew-fatigue.ts` | 0–100 fatigue score from FDP/rest/timezone |
+### 6.2 Phase 2: Aircraft
+
+Inputs: tail (mocked today), aircraft type.
+
+Engines:
+- `resolveAircraftType()` — canonical type from any spelling (ICAO, IATA, marketing, family)
+- `isTypeAuthorized()` — vs `opsSpecs.etopsApproval.authorizedTypes` (B044)
+- `equidistantPoint()` + `findEtopsAlternates()` — ETOPS adequate alternates within bound
+- `effectiveEtopsBound()` — most restrictive of OpsSpec time vs cargo-fire-15min
+- `computeCriticalFuel()` — per-type factors (engine-out / depress / both / standard)
+- `checkAlternateWeather()` — ±1hr TAF window vs C055 minima
+
+Output: tail + ETOPS analysis + critical-fuel scenario driver + dispatch eligibility.
+
+### 6.3 Phase 3: Route
+
+Inputs: origin / destination / aircraft.
+
+Engines:
+- `greatCircleNM()` + `initialBearing()` — distance + heading
+- `fuelEstimate()` — block time + cruise burn from ontology
+- `loadOpsSpecs()` — pulls cost index (per-type override or default)
+- `derivePbnRequirements()` — required RNAV/RNP from route geometry + RNP-AR-airport set
+- `validatePbn()` — required vs authorized → missing list
+
+Output: filed route string + distance + block + CI + PBN status (block dispatch if missing spec).
+
+### 6.4 Phase 4: Fuel
+
+Inputs: origin / destination / aircraft.
+
+Engines:
+- `fuelEstimate()` parameterised by `opsSpecs.fuelPolicy`
+- Fuel-price feed (per-tenant integration) for tankering optimisation
+- Tankering MIP comparing origin vs dest with 3% per 1000 kg burn-to-carry penalty
+
+Output: trip + contingency + alternate + reserve + taxi + (captains) + tankering recommendation.
+
+### 6.5 Phases 5–8
+
+W&B (mocked), Crew (real adapters), Slot/ATC (mocked), Release (joint operational control).
+
+### 6.6 Sub-tools (recap)
+
+| Tool | What it does |
+|---|---|
+| Divert advisor | Rank candidates within 1000nm by runway, ETOPS adequacy, customs, fuel, METAR/TAF window, OpsSpec authorized list |
+| Cascade simulator | Walk fleet rotations, propagate delays through plannedGround – minGroundMin slack |
+| Tankering | Net saving = price diff × kg − burn-to-carry penalty, MTOW envelope check |
+| MEL impact | Cross-reference deferred items vs route conditions (oceanic, etops, icing, dest CAT-III) |
+| Deconflict | 8 conflict types: maintenance, unstaffed, unqualified, FDP/flight-time exceeded, insufficient-rest, double-booked, base-mismatch |
+| NOTAM board | Aggregated across day's schedule, categorised, severity-ranked |
+| SIGMET overlay | Leaflet world map + polygon-vs-route intersection |
+| Fuel-price dashboard | Per-airport price, fleet-average spread highlights, CSV export |
+| EOD report | Roll-up of plan statuses + reviews + rotation catalogue |
 
 ---
 
-## 6. AI features (the GAAS layer)
+## 8. GAAS AI layer — what the agents do
 
-### 6.1 The five per-phase agents
+### 7.1 The five agents
 
-Each agent extends `PlanningBaseAgent` (which extends `BaseAgent`). Each has
-its own system prompt and its own retrieval kinds.
-
-| Agent | Phase | Retrieval kinds | Output cap |
+| Agent | Phase | System prompt thrust | Retrieval set |
 |---|---|---|---|
-| `BriefAgent` | brief | rejection, sop, incident, memory | 700 tok |
-| `RouteAgent` | route | rejection, opsspec, regulation, memory | 700 tok |
-| `FuelAgent` | fuel | rejection, opsspec, memory | 700 tok |
-| `AircraftAgent` | aircraft | rejection, opsspec, incident, memory | 900 tok |
-| `ReleaseAgent` | release | rejection, regulation, memory | 800 tok |
+| `BriefAgent` | brief | Lead with WX impact, mention SIGMET/NOTAM only if material, recommend go/hold/divert | rejection, sop, incident, memory |
+| `RouteAgent` | route | State distance/block/CI; lead with PBN block if any spec missing | rejection, opsspec, regulation, memory |
+| `FuelAgent` | fuel | Block decomp, MTOW margin, tankering call | rejection, opsspec, memory |
+| `AircraftAgent` | aircraft | Tail+type, ETOPS narrative (note when cargo fire is binding), MEL list, dispatch eligible/blocked | rejection, opsspec, incident, memory |
+| `ReleaseAgent` | release | Aggregate phase statuses, withhold if any blocker, FAR 121.533 language | rejection, regulation, memory |
 
-The `PlannerOrchestrator` (`core/agents/planning/PlannerOrchestrator.ts`)
-routes a phase id to the right agent. `lib/planner-phases.ts` calls
-`runAgent(phase, facts, context)` and uses the returned text as the phase
-summary.
+The hard rule on every prompt: **NEVER invent numbers**. Every figure must trace back to the
+structured facts the engine handed in.
 
-### 6.2 RAG (Retrieval-Augmented Generation)
-
-`lib/ai/rag.ts:retrieveContext()` pulls relevant docs from the vector store
-and formats them as a system-prompt suffix. Steps:
-
-1. Build a phase-summary query from the structured facts (each agent overrides
-   `queryFromFacts()` to bias retrieval toward the phase-relevant slice).
-2. `vectorStore.search()` returns top-N matches by cosine similarity, filtered
-   by tenant + kind + phase + min score.
-3. Re-rank by recency (30-day half-life) so fresh docs win ties.
-4. Format into named blocks (PAST REJECTIONS / OPERATOR SPECS / SOPs /
-   REGULATIONS / TENANT MEMORY / INCIDENTS) — visually quoted, treated as
-   reference material not instructions.
-5. Truncate each doc to 500 chars (anti-prompt-injection budget).
-6. Return the system suffix + an audit list of doc ids.
-
-### 6.3 Memory
-
-`lib/ai/memory.ts` wraps the vector store with a fact-shaped API:
-
-```ts
-rememberFact({ scope: 'fuel', title: '...', body: '...', tags: [...] })
-listFacts({ scope?, limit? })
-deleteFact(id)
-```
-
-Facts are stored as `kind='memory'` rows in the vector store, scoped by tenant.
-The phase tag drives which agent retrieves them (e.g., a `fuel` scope fact only
-appears during the fuel phase).
-
-### 6.4 Vector store (pluggable backend)
-
-`lib/ai/vector-store.ts` defines a `VectorStore` interface with two
-implementations:
-
-- **InMemoryVectorStore** — `globalThis`-attached map, HMR-safe, default for
-  local dev. No external dependencies.
-- **RemoteVectorStore** (scaffold) — forwards to the planning Lambda's
-  `/planning/vector/*` endpoints which read/write pgvector via the Aurora
-  cluster. Backed by migration `012_ai_corpus`.
-
-Selection happens in `getVectorStore()` — currently both modes use in-memory;
-the remote bridge ships when the Lambda endpoints are wired (next iteration).
-
-### 6.5 Embeddings (pluggable provider)
-
-`lib/ai/embeddings.ts` defines `EmbeddingProvider` with three implementations:
-
-- **MockEmbeddingProvider** — deterministic 128-dim hash-vector. Default. No
-  API key required. Accuracy is lower than real models but cosine similarity
-  ranking still works for round-trip tests.
-- **VoyageEmbeddingProvider** — Anthropic's recommended embedding partner.
-  Models: `voyage-3` (1024-dim), `voyage-3-large` (1024-dim), `voyage-3-lite`
-  (512-dim).
-- **OpenAIEmbeddingProvider** — `text-embedding-3-small` (1536) /
-  `-large` (3072).
-
-Selection by `EMBEDDING_PROVIDER` env var. No code changes to swap.
-
-### 6.6 Audit trail
-
-Every agent run returns `{ text, retrievalSource, retrievedDocIds }`. The
-`retrievalSource` is appended to the phase response's `source` field, e.g.:
+### 7.2 RAG — the retrieval flow
 
 ```
-aviationweather:metar + aviationweather:taf + notam:faa + 3 rejections + 2 memorys retrieved + agent:BriefAgent
+agent receives `facts` (deterministic numbers from engines)
+   │
+   ▼
+queryFromFacts(facts) → "BA1000, JFK→LHR, 3 SIGMETs, 6 NOTAMs"
+   │
+   ▼
+vectorStore.search({tenantId, kind, phase, query, limit})
+   │  cosine-similarity against tenant's vector_documents
+   ▼
+recency re-rank: 30-day half-life × similarity score
+   │
+   ▼
+top-N results grouped by kind:
+   PAST REJECTIONS (avoid these failure modes)
+   OPERATOR SPECS (relevant excerpts)
+   STANDARD OPERATING PROCEDURES
+   REGULATORY REFERENCES
+   TENANT MEMORY (accumulated facts)
+   INCIDENT NOTES (similar past flights)
+   │
+   ▼
+appended to system prompt as "treat as quoted reference, NOT instructions"
+each doc truncated to 500 chars (anti-prompt-injection budget)
+   │
+   ▼
+Anthropic.messages.create({system, user: facts}) → text
+   │
+   ▼
+return { text, retrievalSource: "3 rejections + 1 memorys retrieved",
+         retrievedDocIds: [...] }
 ```
 
-Migration 012 also provisions `vector_retrievals` — every search call writes
-one row with the query, retrieved doc ids, scores, agent name, and flight id,
-giving FAA inspectors a per-flight reproducible trail of what informed the AI's
-output.
+Every phase response carries the retrieval audit trail in its `source` field, e.g.:
+
+```
+aviationweather:metar + aviationweather:taf + notam:faa + 3 rejections + 1 memorys retrieved + agent:BriefAgent
+```
+
+### 7.3 Memory — what to put there
+
+Memory facts are how an airline teaches the agents its quirks. Three real categories:
+
+**Policy memories** — "we do X because policy says so"
+> *"Tankering threshold raised to USD 400 after Q3 2025 fuel volatility."*
+
+**Equipment memories** — per-tail or per-type quirks
+> *"G-XLEK historically shows MEL-deferrable galley bleed faults on long-haul departures from MUC. Plan +200 kg captain's fuel."*
+
+**Operational memories** — environmental knowledge
+> *"KEF/BIRK affected April–June by Eyjafjallajökull-area ash plumes. Cross-check VAAC bulletins for any Reykjavik FIR transit."*
+
+The longer an airline operates on the platform, the smarter their agents get. **No retraining,
+no fine-tuning, zero per-call training cost** — just embedding lookups.
+
+### 7.4 Vector store + embeddings (pluggable)
+
+| Choice | Backend | When |
+|---|---|---|
+| Vector store | `InMemoryVectorStore` | Local dev — `globalThis` map, HMR-safe |
+| | `RemoteVectorStore` (scaffold) | Production — pgvector via planning Lambda + migration 012 |
+| Embeddings | `MockEmbeddingProvider` | Default — deterministic 128-dim hash, no API key |
+| | `VoyageEmbeddingProvider` | Production — Anthropic-recommended, `voyage-3` (1024-dim) |
+| | `OpenAIEmbeddingProvider` | Production — OpenAI shop, `text-embedding-3-small` (1536) |
+
+Selection by env var only — no code change. See §9.4.
+
+### 7.5 Audit trail (FAA-ready)
+
+Every retrieval logs to `vector_retrievals` (migration 012):
+
+```
+id │ tenant_id │ flight_id │ phase  │ query                  │ retrieved                                │ agent
+───┼───────────┼───────────┼────────┼────────────────────────┼──────────────────────────────────────────┼─────────────
+42 │ aerospica │ BA1000-… │ brief  │ JFK→LHR, 3 SIGMETs    │ [{id,kind,score}, …]                     │ BriefAgent
+```
+
+For any released flight, an inspector can replay exactly which knowledge informed the AI's
+output. That's the point of GAAS-for-aviation: explainable AI in a regulated context.
 
 ---
 
-## 7. How it works — architecture
+## 9. Installation
 
-### 7.1 Per-phase request flow
+### 8.1 Local dev (zero infra)
 
-```
-       /api/planner/[phase]   → planner-phases:phase()
-                                       │
-              ┌────────────────────────┼────────────────────────┐
-              ▼                        ▼                        ▼
-  Deterministic engines        OpsSpecs loader          AI: runAgent()
-  (perf, etops, pbn, mel,      (cache: 'no-store')             │
-   ops-specs, crew, …)                                         │
-              │                        │                       ▼
-              └─────── facts ──────────┘            ┌─────────────────────┐
-                          │                          │ PlannerOrchestrator │
-                          ▼                          │       │              │
-                  PhaseResult.data                  │       ▼              │
-                                                    │  Per-phase agent    │
-                                                    │       │              │
-                                                    │       ▼              │
-                                                    │  RAG.retrieveContext │
-                                                    │       │              │
-                                                    │       ▼              │
-                                                    │  VectorStore.search │
-                                                    │       │              │
-                                                    │       ▼              │
-                                                    │  Anthropic.messages │
-                                                    └──────┬──────────────┘
-                                                            │
-                                                            ▼
-                                                  PhaseResult.summary +
-                                                  PhaseResult.source
+```bash
+git clone https://github.com/swapna15/airline-app && cd airline-app
+npm install
+
+cat > .env.local <<'EOF'
+NEXTAUTH_SECRET=$(openssl rand -base64 32)
+NEXTAUTH_URL=http://localhost:3000
+ANTHROPIC_API_KEY=sk-ant-...
+EMBEDDING_PROVIDER=mock
+EOF
+
+npm run dev    # → http://localhost:3000
 ```
 
-### 7.2 Single source of truth
+Sign in with `admin@x.com` for admin role, `planner@x.com` for planner, etc. (Local-dev role
+derivation; in prod, role is the `users.role` column.)
 
-| Concept | Canonical home |
+### 8.2 Production (AWS + Vercel)
+
+```bash
+# 1. Provision AWS
+cd infra/terraform
+terraform init
+terraform apply \
+  -var="frontend_url=https://your-app.vercel.app" \
+  -var="nextauth_secret=$(openssl rand -base64 32)"
+
+# 2. Run migrations (creates schema + ops_specs + pgvector)
+aws lambda invoke --function-name airline-app-migrate --payload '{}' /tmp/out.json
+
+# 3. Deploy frontend
+vercel --prod
+```
+
+Required Vercel env:
+
+| Var | Purpose |
 |---|---|
-| Aircraft type | `shared/semantic/aircraft.ts` (ICAO/IATA/marketing/family/aliases + perf + ETOPS) |
-| Airline | `shared/semantic/airline.ts` (ICAO/IATA/callsign/alias) |
-| FIR | `shared/semantic/fir.ts` (ICAO FIR id + label) |
-| Airport | `lib/icao.ts` + `lib/airports.json` |
-| Flight | `shared/schema/flight.ts` (Zod-validated `OwnFlight` discriminated union) |
-
-Every consumer (planner, divert advisor, ETOPS check, OpsSpecs match) calls
-the canonical resolver — no substring matching anywhere.
-
-### 7.3 Multi-tenant isolation
-
-- **JWT-driven** — every request carries the NextAuth JWT with `tenantSlug`.
-  The API Gateway authorizer Lambda verifies it and injects the slug into the
-  request context.
-- **Postgres RLS** — `flight_plans`, `vector_documents`, `vector_retrievals`,
-  `dispatcher_certificates` all enforce `tenant_id = current_setting('app.tenant_id')`.
-- **Per-tenant config** — OpsSpecs, integration configs, AI memory are all
-  keyed by tenant.
+| `NEXTAUTH_SECRET` | Match Lambda's |
+| `NEXTAUTH_URL` | Your Vercel URL |
+| `ANTHROPIC_API_KEY` | Claude for all agents |
+| `NEXT_PUBLIC_API_URL` | API Gateway URL from Terraform output |
+| `EMBEDDING_PROVIDER` | `voyage` or `openai` |
+| `VOYAGE_API_KEY` or `OPENAI_API_KEY` | Per the above |
 
 ---
 
-## 8. Testing the current features
+## 10. Configuration reference (every per-tenant knob)
 
-### 8.1 Multi-agent system (this PR)
+### 9.1 OpsSpecs (`/admin/ops-specs`)
 
-#### 8.1.1 Verify the BriefAgent runs
+See §5 Step 3 for the full JSON.
 
-1. `npm run dev`
-2. Sign in as `planner@x.com` (or any planner email)
-3. Go to `/planner` → pick `BA1000 · JFK→LHR · Boeing 777-300ER`
-4. Run **Brief** phase
-5. The summary text is now produced by `BriefAgent`. The response source
-   string ends with `… + agent:BriefAgent` — confirms the orchestrator was
-   used (not the legacy `PlanningAgent.summarize`).
+### 9.2 Integrations (`/admin/integrations`)
 
-#### 8.1.2 Verify RAG retrieval
+| Domain | Provider env | Required URLs / tokens |
+|---|---|---|
+| Fuel prices | `FUEL_PRICE_PROVIDER` ∈ {mock, csv, api_fms} | `FUEL_PRICE_API_URL`, `FUEL_PRICE_API_TOKEN`, `FUEL_PRICE_API_AUTH_METHOD` |
+| MEL | `MEL_PROVIDER` ∈ {mock, csv, api_amos, api_trax, api_camo} | `MEL_API_URL`, `MEL_API_TOKEN` |
+| Crew | `CREW_PROVIDER` ∈ {mock, csv, api_sabre, api_jeppesen, api_aims} | `CREW_API_ROSTER_URL`, `CREW_API_ASSIGNMENTS_URL`, `CREW_API_TOKEN` |
 
-1. Go to `/admin/ai/memory`
-2. Add a memory fact:
-   - Scope: `brief`
-   - Title: `Volcanic ash advisory near Iceland`
-   - Body: `KEF and BIRK are commonly affected by Eyjafjallajökull-area ash plumes April–June. Always cross-check VAAC bulletins for any flight transiting Reykjavik FIR.`
-3. Re-run the **Brief** phase for any North Atlantic flight (BA1000 or LH4410)
-4. Open DevTools → Network → POST `/api/planner/brief` response
-5. `source` field should now read `… + 1 memorys retrieved + agent:BriefAgent`
-6. The summary text should reference the volcanic ash concern if the
-   embedding-similarity score is high enough (expect ~0.3+ with the mock provider for North-Atlantic-related queries)
+CSV schemas: `scripts/sample-fuel-prices.csv`, `scripts/sample-mel-deferrals.csv`,
+`scripts/sample-crew-roster.csv`, `scripts/sample-crew-assignments.csv`.
 
-#### 8.1.3 Verify rejection-comment auto-backfill
+Token references: `env://VAR` or `secretsmanager:arn:…`.
 
-1. After running Brief once, click **Reject** with a comment like `Did not mention destination MVFR forecast`
-2. Re-run Brief for the same flight
-3. The response source should include `1 rejections retrieved` — proving the
-   rejection comment was auto-embedded into the vector store and surfaced via
-   RAG on the next pass
+### 9.3 Dispatcher certs (`/admin/dispatcher-certs`)
 
-#### 8.1.4 Verify per-tenant isolation
+See §5 Step 5 for the row shape.
 
-1. Sign in as a different tenant's admin (or impersonate via JWT swap)
-2. `/admin/ai/memory` should show an empty list — facts don't leak across tenants
+### 9.4 GAAS env vars
 
-### 8.2 Other current features (recap from earlier work)
+| Var | Default | Purpose |
+|---|---|---|
+| `EMBEDDING_PROVIDER` | `mock` | `mock` / `voyage` / `openai` |
+| `VOYAGE_API_KEY` | — | Required when `voyage` |
+| `VOYAGE_MODEL` | `voyage-3` | `voyage-3` / `voyage-3-large` / `voyage-3-lite` |
+| `OPENAI_API_KEY` | — | Required when `openai` |
+| `OPENAI_EMBEDDING_MODEL` | `text-embedding-3-small` | OpenAI model id |
 
-| Feature | Test path |
+### 9.5 AI memory (`/admin/ai/memory`)
+
+Per-fact:
+
+```jsonc
+{
+  "scope": "fuel",                  // brief | route | fuel | aircraft | crew | release | general
+  "title": "Tankering threshold raised post Q3 2025",
+  "body":  "Internal policy raised…",
+  "tags":  ["tankering", "policy"]
+}
+```
+
+Stored as `vector_documents` row with `kind='memory'`, embedding generated server-side at
+write time. Retrieved automatically during the matching phase.
+
+---
+
+## 11. Testing
+
+### 10.1 Test the GAAS layer
+
+#### A. BriefAgent runs and is wired
+
+1. `npm run dev`, sign in as `planner@x.com`
+2. `/planner` → BA1000 → run **Brief**
+3. **DevTools → Network → POST `/api/planner/brief`** → response `source` ends with `agent:BriefAgent`
+
+#### B. Memory retrieval works
+
+1. `/admin/ai/memory` → add a fact:
+   - Scope: `brief`, Title: `Volcanic ash near Iceland`, Body: paste from §5 Step 6
+2. Re-run BA1000 Brief
+3. Network response: `source` includes `1 memorys retrieved`
+4. The brief text should reference the volcanic concern when geographically relevant
+
+#### C. Rejection feedback loop works
+
+1. After a brief, click **Reject** with comment `"Did not mention destination MVFR forecast"`
+2. Re-run brief
+3. Response source: `1 rejections retrieved`
+4. The new brief should explicitly note destination WX category
+
+#### D. Tenant isolation
+
+1. Sign in as a different tenant's admin
+2. `/admin/ai/memory` should be empty (your facts didn't leak across tenants)
+
+### 10.2 Test each shipped feature
+
+| Feature | Path | Look for |
+|---|---|---|
+| Per-tail ETOPS perf | `/planner` → BA1000 Aircraft | `perf: B77W (1.05× / 2.55× / 1.65×, source: first-pass)` |
+| Cargo fire bound | Same | `within 180 min (OpsSpec B044), cargo fire 195 min not binding` |
+| TAF ETA-window | `/planner/divert` BA1000 | Header `wx source: N TAF · M METAR`; row pill `✓ alt min taf` |
+| C055 minima | `/admin/ops-specs` raise to 1500 ft / 5 SM, divert | Most rows flip to `✕ below alt min` |
+| AuthorizedAirports | List = `EGKK, LFPG`, run BA1000 divert | Red banner appears |
+| Cost index | `byType.B77W = 80`, run BA1000 Route | `(CI 80)` in summary |
+| PBN | Remove `RNP-4` from rnpLevels, BA1000 Route | `⛔ PBN: route requires RNP-4` |
+| Critical fuel | BA1000 Aircraft | `Critical fuel (driver: depress)` on long oceanic |
+| Tankering | `/planner/tankering` | Net saving column with MTOW envelope check |
+| MEL | `/planner/mel` | Block / warn severity rows |
+| Deconflict | `/planner/deconflict` | 8 conflict-type ribbon |
+| NOTAM | `/planner/notams` | Categorised, criticals highlighted |
+| SIGMET | `/planner/sigmet` | World map + polygon-route intersection sidebar |
+| Crew fatigue | `/planner` → Crew phase | Score breakdown (FDP / rest / timezone) |
+
+---
+
+## 12. Pending items / roadmap
+
+### 11.1 GAAS layer
+
+| Item | Status | Effort |
+|---|---|---|
+| Wire RouteAgent / FuelAgent / AircraftAgent / ReleaseAgent into `lib/planner-phases.ts` | Built + tested but only `brief` is wired today; one-line each | 2 hr |
+| Swap InMemoryVectorStore for RemoteVectorStore (pgvector via planning Lambda) | Migration 012 ships schema; need `/planning/vector/*` Lambda handler | 1 day |
+| MemoryAgent — auto-extract facts from approved/rejected pairs | Concept ready, not built | 1 day |
+| Streaming agent responses (token-by-token UI) | Anthropic SDK supports it; UI work too | 1 day |
+| Vercel AI Gateway integration | Hooks flagged it during build; routes Anthropic+Voyage+OpenAI through one observable proxy | 0.5 day |
+| Observability (logger / error tracking on every route) | Cross-cutting; all routes currently bare | 0.5 day |
+
+### 11.2 Dispatch core
+
+| Item | Source | Effort |
+|---|---|---|
+| #4 ICAO Form 7233-4 generator (Item 7/9/10/13/15/16/18/19) | design doc §1A | 1 day |
+| #6 Re-dispatch fuel ("decision-point procedure") | design doc §1A | 1 day |
+| #7 Wind-optimized routing (NOAA GFS / ECMWF 4-D grid) | design doc §1A — biggest gap | 2–3 days |
+| #8 NAT-OTS / PACOTS oceanic tracks | design doc §1A | 1 day |
+| #10 Conflict-zone screening (EASA Conflict Zone Bulletins) | design doc §1A | 0.5 day |
+
+### 11.3 Already shipped (the "what works" recap)
+
+- 8-phase planner workflow with HITL release
+- Diversion advisor (C055 minima + authorizedAirports + ETOPS adequacy + TAF ETA-window check)
+- Delay cascade simulator
+- Tankering decision tool (3.5%/hr burn-to-carry, MTOW envelope, fuel-price feed)
+- MEL impact assessment (kind discriminated union, 4 categories A/B/C/D)
+- Schedule deconfliction (8 conflict types)
+- NOTAM briefing board with severity
+- SIGMET / airspace world-map overlay
+- Crew fatigue calculator
+- Fuel-price dashboard (CSV export)
+- Real airport data (verified/heuristic dataQuality flag)
+- Round-trip persistence integrity tests
+- Dispatcher certifications + § 121.463 currency gating
+- Operations Specifications — all 7 blocks driving real planner behaviour
+- ETOPS critical fuel + per-tail perf factors + cargo fire suppression bound
+- Semantic ontology (aircraft, airline, FIR, airport)
+- Pluggable integrations (fuel-price, MEL, crew) — mock / CSV / API+JWT
+- Multi-tenant: JWT + RLS + per-tenant OpsSpecs / fleet / MEL / crew / fuel-feed / AI memory
+- **Multi-agent GAAS layer**: 5 per-phase agents + RAG + per-tenant memory + pluggable embeddings + pluggable vector store + admin UI
+
+---
+
+## 13. Glossary
+
+| Term | Meaning |
 |---|---|
-| Per-tail ETOPS perf factors | `/planner` → BA1000 Aircraft phase → look for `perf: B77W (1.05× / 2.55× / 1.65×, source: first-pass)` line |
-| Cargo fire bound | Same — line shows `within 180 min (OpsSpec B044), cargo fire 195 min not binding` |
-| TAF ETA-window for divert | `/planner/divert` → BA1000 weather → header chip `wx source: N TAF · M METAR`, per-row pill `✓ alt min taf` |
-| OpsSpec authorizedAirports | `/admin/ops-specs` → set list to `EGKK, LFPG` → `/planner/divert` BA1000 → red banner appears |
-| OpsSpec alternate minima | `/admin/ops-specs` → set 1500 ft / 5 SM → divert candidates get `✕ below alt min` pills |
-| OpsSpec costIndex | `/admin/ops-specs` → set byType `B77W: 80` → BA1000 Route phase → `(CI 80)` |
-| PBN authorization | `/admin/ops-specs` → remove `RNP-4` → BA1000 Route phase → `⛔ PBN: route requires RNP-4` |
-| Critical-fuel ETOPS | BA1000 Aircraft phase → look for `Critical fuel (driver: depress)` on long oceanic |
-
-### 8.3 Smoke test all five agents (when wired)
-
-`brief` is wired in this PR; the other four phases (`route`, `fuel`,
-`aircraft`, `release`) currently produce summaries deterministically. The
-agents are built and ready — wiring is incremental: replace the deterministic
-summary string with `await runAgent({phase, facts, context})` in each phase
-function. (One-line change per phase; intentionally staged to keep the diff
-auditable.)
-
----
-
-## 9. Advantages over building piecewise
-
-1. **Semantic layer collapses N×M consumer-by-spelling matrix** —
-   `Boeing 777` / `B77W` / `77W` / `Boeing-777-300ER` all resolve via one
-   call. New variants are one-line edits.
-2. **Single source of truth for ETOPS perf** — per-type factors live in the
-   ontology; planner, divert, and the agents all read from it. Override one
-   place and every consumer updates.
-3. **Multi-agent isolation** — each phase has its own prompt + retrieval set.
-   A regression in the FuelAgent doesn't affect BriefAgent. Tuning one
-   doesn't risk the other.
-4. **Provider-pluggable everywhere** — fuel feed, MEL feed, crew feed,
-   embeddings, vector store. Mock for dev, CSV for FMS migration, API for
-   production.
-5. **OpsSpec drives behaviour, not code** — admin edits flow through to
-   planner/divert/agents on the next request. No deploy required.
-6. **Audit trail by construction** — every agent run carries
-   `retrievalSource` + doc ids. Every retrieval (in production) writes to
-   `vector_retrievals`. FAA inspector gets a reproducible chain.
-7. **AI failure is graceful** — if Anthropic is down, deterministic engines
-   still produce a `PhaseResult.data` complete with all the structured
-   numbers. Only the prose summary is missing.
-8. **Per-tenant memory accumulates** — every rejection comment auto-embeds.
-   The longer an airline operates on the platform, the smarter its agents get.
-   No retraining, no cost.
+| **AIRAC** | Aeronautical Information Regulation And Control — 28-day cycle for navigation database updates |
+| **C055 / B044 / etc.** | OpsSpec paragraph references (alt minima, ETOPS, etc.) |
+| **CI (Cost Index)** | Dimensionless ratio of time-cost to fuel-cost. CI=0 → max range; CI=999 → min time |
+| **CTOT** | Calculated Take-Off Time (Eurocontrol) |
+| **EDTO** | Extended Diversion Time Operations — ICAO term for what the FAA calls ETOPS |
+| **EP** | Equidistant Point — midpoint of an ETOPS leg |
+| **ETOPS** | Extended-range Twin-engine Operational Performance Standards |
+| **FDP** | Flight Duty Period — total on-duty time |
+| **FOO/FD** | Flight Operations Officer / Flight Dispatcher (ICAO term) |
+| **FTL** | Flight Time Limitations |
+| **IROPS** | Irregular Operations (recovery from disruption) |
+| **JeppView / NavBlue** | Commercial dispatch route + airport data providers |
+| **MEL / CDL** | Minimum Equipment List / Configuration Deviation List |
+| **MTOW** | Maximum Take-Off Weight (structural limit) |
+| **NAT-OTS / PACOTS** | North Atlantic / Pacific Organised Track Systems |
+| **NOTAM** | Notice to Air Missions |
+| **OCC / IOC / NOC** | Operations Control Centre — names vary by airline |
+| **OFP** | Operational Flight Plan — the document the dispatcher produces |
+| **OpsSpec** | Operations Specifications — operator's authorized config from FAA/EASA |
+| **PAX** | Passengers |
+| **PBN** | Performance-Based Navigation (umbrella for RNAV + RNP) |
+| **PEP** | Performance Engineering Program (Boeing/Airbus per-tail tables) |
+| **PIC** | Pilot in Command |
+| **PNR** | Passenger Name Record |
+| **RAG** | Retrieval-Augmented Generation |
+| **RFF** | Rescue and Fire Fighting (ICAO airport category 1–10) |
+| **RLS** | Row-Level Security (Postgres) |
+| **RNAV** | aRea NAVigation — track-defined routing |
+| **RNP / RNP-AR** | Required Navigation Performance / Authorisation Required |
+| **SIGMET / AIRMET** | Significant Met info / Airmen's Met info |
+| **TAF** | Terminal Aerodrome Forecast |
+| **TFR** | Temporary Flight Restriction |
+| **VAAC** | Volcanic Ash Advisory Center |
 
 ---
 
-## 10. Pending items
-
-### 10.1 GAAS layer — next iterations
-
-- **Wire the remaining four agents** (route, fuel, aircraft, release) into
-  `lib/planner-phases.ts`. Today the agents are built and tested but only
-  `brief` calls the orchestrator. Each is a one-line wire.
-- **Replace InMemoryVectorStore in production** with the pgvector-backed
-  RemoteVectorStore. Migration 012 already ships the schema; the remaining
-  work is a `/planning/vector/*` Lambda handler.
-- **Auto-extract memory from approved/rejected pairs** — a "MemoryAgent" that
-  reads the diff between draft and final OFPs and proposes new memory facts
-  for human approval.
-- **Streaming responses** via Anthropic SDK's stream API — currently agents
-  block until the full response. Streaming would surface the brief sentence-
-  by-sentence in the UI.
-- **Vercel AI Gateway integration** — flagged by the Vercel best-practices
-  hooks during this PR. Would route Anthropic + Voyage + OpenAI calls through
-  one observable proxy with cost tracking and provider fallback. Today the
-  codebase calls Anthropic SDK directly (matches the existing
-  `core/agents/base.ts` pattern); switching is a future enhancement.
-- **Observability** — every route handler is currently bare. Cross-cutting
-  concern; planned alongside the AI Gateway switch (one logger for both
-  product code and AI calls).
-
-### 10.2 Dispatch features still pending
-
-From `.claude/specs/flight_planning_design.md`:
-
-- **#1 Multi-agent refactor of PlanningAgent** — done in this PR.
-- **#4 ICAO Flight Plan Form 7233-4 generator** — generate the filing string
-  (Items 7/9/10/13/15/16/18/19) from the OFP.
-- **#6 Re-dispatch fuel ("decision-point procedure")** — initially plan to
-  closer alternate, re-release en route. Saves fuel on ultra-long-haul.
-- **#7 Wind-optimized routing** — replace haversine with 4-D NOAA GFS / ECMWF
-  grid. Biggest single design-doc gap.
-- **#8 NAT-OTS / PACOTS oceanic tracks** — pull published tracks twice daily,
-  file along them.
-- **#10 Conflict zone screening** — Russia/Ukraine/Iran/Yemen polygon-vs-route
-  check per EASA Conflict Zone Bulletins.
-
-### 10.3 Already shipped (for the record)
-
-- ✅ 8-phase planner workflow (brief / aircraft / route / fuel / W&B / crew / slot-ATC / release)
-- ✅ Diversion advisor with C055 minima + authorizedAirports + ETOPS + TAF ETA-window
-- ✅ Delay cascade simulator
-- ✅ Tankering decision tool
-- ✅ MEL impact assessment
-- ✅ Schedule deconfliction (8 conflict types)
-- ✅ NOTAM briefing board
-- ✅ SIGMET / airspace overlay (Leaflet world map)
-- ✅ Crew fatigue calculator
-- ✅ Fuel price dashboard
-- ✅ Real airport data with verified/heuristic dataQuality flag
-- ✅ Round-trip data integrity tests
-- ✅ Dispatcher certifications + § 121.463 currency
-- ✅ Operations Specifications (all seven blocks wired into planning behaviour)
-- ✅ ETOPS critical fuel + ±1hr alternate weather + per-tail perf factors + cargo fire bound
-- ✅ Semantic ontology (aircraft, airline, FIR, airport)
-- ✅ Pluggable integrations (fuel-price, MEL, crew) — mock / CSV / API+JWT
-- ✅ Multi-tenant: JWT, RLS, per-tenant OpsSpecs / fleet / MEL / crew / fuel-feed
-- ✅ Multi-agent GAAS layer: 5 per-phase agents + RAG + per-tenant memory + pluggable embeddings + pluggable vector store + admin UI
-
----
-
-## Appendix A — File map (what was added in the GAAS PR)
+## 14. Appendix — file map
 
 ```
-lib/ai/
-  embeddings.ts                              # pluggable embedding providers
-  vector-store.ts                            # pluggable vector store (in-memory + pgvector scaffold)
-  rag.ts                                     # retrieve + format + recency re-rank
-  memory.ts                                  # per-tenant fact API
-  tenant.ts                                  # JWT → tenant slug helper
+shared/
+  schema/flight.ts                           # Zod-validated OwnFlight (canonical)
+  semantic/
+    aircraft.ts                              # ICAO/IATA/marketing/family resolver + perf + ETOPS
+    airline.ts                               # ICAO/IATA/callsign/alias resolver
+    fir.ts                                   # FIR id + label
 
-core/agents/planning/
-  PlanningBaseAgent.ts                       # shared substrate (RAG + audit)
-  BriefAgent.ts                              # weather/NOTAM narrative
-  RouteAgent.ts                              # route + PBN narrative
-  FuelAgent.ts                               # fuel decomposition narrative
-  AircraftAgent.ts                           # tail/MEL/ETOPS narrative
-  ReleaseAgent.ts                            # go/no-go synthesis
-  PlannerOrchestrator.ts                     # phase → agent dispatch
+lib/
+  ai/                                        # GAAS infrastructure (this PR)
+    embeddings.ts                            # pluggable provider
+    vector-store.ts                          # pluggable backend (in-memory + pgvector scaffold)
+    rag.ts                                   # retrieve + re-rank + format
+    memory.ts                                # typed fact API
+    tenant.ts                                # JWT → tenant slug
+  ops-specs.ts                               # OpsSpecs loader (no-store fetch)
+  pbn.ts                                     # RNAV/RNP requirements + validation
+  etops.ts                                   # critical fuel + cargo fire bound
+  perf.ts                                    # great-circle + cruise burn
+  mel.ts                                     # MEL evaluation
+  crew.ts                                    # roster / assignments
+  crew-fatigue.ts                            # 0–100 fatigue score
+  aviationweather.ts                         # METAR / TAF / SIGMET + TAF window parser
+  icao.ts                                    # airport reference (3,400 entries)
+  fleet.ts                                   # mocked rotations
+  fuelprices.ts                              # façade over pluggable fuel-price providers
 
-app/api/admin/ai/memory/route.ts             # GET/POST/DELETE memory facts
-app/admin/ai/memory/page.tsx                 # admin UI for memory facts
-app/admin/page.tsx                           # added link to /admin/ai/memory
+core/agents/
+  base.ts                                    # BaseAgent (Anthropic SDK wrapper)
+  planning/                                  # GAAS agent suite (this PR)
+    PlanningBaseAgent.ts                     # shared substrate (RAG + audit)
+    BriefAgent.ts | RouteAgent.ts | FuelAgent.ts | AircraftAgent.ts | ReleaseAgent.ts
+    PlannerOrchestrator.ts                   # phase → agent dispatch
 
-infra/db/migrations/012_ai_corpus.sql        # pgvector + corpus + retrieval log
-infra/lambdas/migrate/handler.ts             # registered 012
+app/
+  api/admin/ai/memory/route.ts               # GET/POST/DELETE memory facts
+  admin/ai/memory/page.tsx                   # admin UI for facts
+  api/planner/[phase]/route.ts               # phase dispatcher (uses runAgent)
+  api/planner/divert/route.ts                # divert advisor
+  api/planner/{cascade,tankering,mel,deconflict,notams,sigmet,fuel-prices,eod}/route.ts
+  planner/                                   # the planner role's UI pages
+  admin/                                     # tenant configuration UIs
+
+infra/db/migrations/
+  001_schema.sql                             # base
+  002_seed.sql                               # demo data
+  003_multi_tenant.sql                       # tenants table + RLS
+  004_flight_plans.sql                       # plans + reviews
+  005_integration_configs.sql                # per-tenant integration config
+  006_add_flight_planner_user.sql            # planner role
+  007_flight_plans_text_id.sql               # flight_id relax
+  008_flight_plans_uuid_id.sql               # flight_id restore
+  009_dispatcher_certifications.sql          # certs + currency
+  010_ops_specs.sql                          # 7-block OpsSpecs
+  011_pbn_oceanic_defaults.sql               # backfill RNP-4 / RNP-10
+  012_ai_corpus.sql                          # pgvector + retrieval audit (this PR)
+
+infra/lambdas/
+  authorizer/                                # JWT verification
+  users/ flights/ bookings/ checkin/ gate/ admin/ planning/ migrate/
 
 GAAS-AIRLINEOS.md                            # this document
 ```
 
-## Appendix B — Environment variables reference
+---
 
-| Variable | Required | Default | Purpose |
-|---|---|---|---|
-| `NEXTAUTH_SECRET` | yes | — | NextAuth JWT signing |
-| `NEXTAUTH_URL` | yes | — | Full app URL |
-| `ANTHROPIC_API_KEY` | yes | — | Claude API for all agents |
-| `NEXT_PUBLIC_API_URL` | no | unset | API Gateway base; unset = mocks |
-| `EMBEDDING_PROVIDER` | no | `mock` | `mock` \| `voyage` \| `openai` |
-| `VOYAGE_API_KEY` | when `voyage` | — | Voyage AI API key |
-| `VOYAGE_MODEL` | no | `voyage-3` | `voyage-3` \| `voyage-3-large` \| `voyage-3-lite` |
-| `OPENAI_API_KEY` | when `openai` | — | OpenAI API key |
-| `OPENAI_EMBEDDING_MODEL` | no | `text-embedding-3-small` | OpenAI model id |
-| `DUFFEL_ACCESS_TOKEN` | no | — | Real flight inventory |
-| `FAA_CLIENT_ID` / `FAA_CLIENT_SECRET` | no | — | NOTAM API |
-| `FUEL_PRICE_PROVIDER` | no | `mock` | `mock` \| `csv` \| `api_fms` |
-| `MEL_PROVIDER` | no | `mock` | `mock` \| `csv` \| `api_amos` \| `api_trax` \| `api_camo` |
-| `CREW_PROVIDER` | no | `mock` | `mock` \| `csv` \| `api_sabre` \| `api_jeppesen` \| `api_aims` |
+**Last updated**: 2026-04-30. Tracks commits up to `e7c7b21` (GAAS layer release).
