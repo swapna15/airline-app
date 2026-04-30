@@ -1,10 +1,10 @@
 'use client';
 
-import { useCallback, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Zap, Loader2, Clock, ArrowRight } from 'lucide-react';
 import { PlannerTabs } from '@/components/PlannerTabs';
-import { AutoPrepareProgress, usePollRun, type AutoPrepareRun } from '@/components/AutoPrepareProgress';
+import { AutoPrepareProgress, type AutoPrepareRun } from '@/components/AutoPrepareProgress';
 
 interface FlightRow {
   id: string;
@@ -42,11 +42,7 @@ function minutesUntil(hhmm: string): number {
   return Math.round((target.getTime() - now.getTime()) / 60000);
 }
 
-function FlightProgressRow({ flight, runId }: { flight: FlightRow; runId: string | null }) {
-  const [run, setRun] = useState<AutoPrepareRun | null>(null);
-  const onUpdate = useCallback((r: AutoPrepareRun) => setRun(r), []);
-  usePollRun(runId, onUpdate);
-
+function FlightProgressRow({ flight, run }: { flight: FlightRow; run: AutoPrepareRun | null }) {
   const eta = minutesUntil(flight.scheduled);
   const etaLabel = eta < 0 ? `${-eta}m ago` : `T-${eta}m`;
 
@@ -80,7 +76,7 @@ function FlightProgressRow({ flight, runId }: { flight: FlightRow; runId: string
 
 export default function PlannerBatchPage() {
   const [windowSel, setWindowSel] = useState<Window>('next4h');
-  const [runIdsByFlight, setRunIdsByFlight] = useState<Record<string, string>>({});
+  const [runsByFlight, setRunsByFlight] = useState<Record<string, AutoPrepareRun>>({});
   const [busy, setBusy] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set(TODAY.map((f) => f.id)));
 
@@ -112,14 +108,15 @@ export default function PlannerBatchPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ flights }),
       });
-      const json = (await res.json()) as { runs: { runId: string; flight: string; scheduled: string }[] };
-      const map: Record<string, string> = { ...runIdsByFlight };
-      // Match returned runs back to flight rows by flight number + scheduled time.
+      const json = (await res.json()) as {
+        runs: { run: AutoPrepareRun; flight: string; scheduled: string }[];
+      };
+      const map: Record<string, AutoPrepareRun> = { ...runsByFlight };
       for (const r of json.runs ?? []) {
         const row = flights.find((f) => f.flight === r.flight && f.scheduled === r.scheduled);
-        if (row) map[row.id] = r.runId;
+        if (row) map[row.id] = r.run;
       }
-      setRunIdsByFlight(map);
+      setRunsByFlight(map);
     } finally {
       setBusy(false);
     }
@@ -180,7 +177,7 @@ export default function PlannerBatchPage() {
                 aria-label={`select ${f.flight}`}
               />
               <div className="flex-1 min-w-0">
-                <FlightProgressRow flight={f} runId={runIdsByFlight[f.id] ?? null} />
+                <FlightProgressRow flight={f} run={runsByFlight[f.id] ?? null} />
               </div>
             </div>
           ))}

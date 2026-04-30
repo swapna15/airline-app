@@ -76,10 +76,26 @@ export function listRuns(): Run[] {
   return Array.from(REG.byId.values()).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
+function newRun(flight: FlightInput, reviewerId?: string): Run {
+  return {
+    id: newRunId(),
+    flight,
+    status: 'running',
+    phases: emptyPhases(),
+    startedAt: new Date().toISOString(),
+    reviewerId,
+  };
+}
+
 /**
  * Idempotent kick-off: if a run is already live for this flight, return that
  * run instead of starting a duplicate. Released-plan short-circuit lives in
  * the API route (we can't reach the plan store without auth here).
+ *
+ * Fire-and-forget — the registry is in-memory so this only works when the
+ * caller is running on the SAME process for the lifetime of the run. On
+ * serverless (Vercel Functions), use `runToCompletion` instead, which awaits
+ * inside one invocation and returns the finished Run.
  */
 export function startRun(flight: FlightInput, authToken: string | null, reviewerId?: string): Run {
   const key = flightKey(flight);
@@ -89,24 +105,28 @@ export function startRun(flight: FlightInput, authToken: string | null, reviewer
     if (live && live.status === 'running') return live;
   }
 
-  const run: Run = {
-    id: newRunId(),
-    flight,
-    status: 'running',
-    phases: emptyPhases(),
-    startedAt: new Date().toISOString(),
-    reviewerId,
-  };
+  const run = newRun(flight, reviewerId);
   REG.byId.set(run.id, run);
   REG.liveByFlight.set(key, run.id);
 
-  // Fire-and-forget — the request returns immediately with the run id.
-  void execute(run, authToken).catch(() => {
-    // execute() captures errors per phase; this catch is a safety net for
-    // anything outside the per-phase try/catch (it should never fire).
-    finalize(run);
-  });
+  void execute(run, authToken).catch(() => finalize(run));
+  return run;
+}
 
+/**
+ * Synchronous variant — creates a run, awaits all phases, returns the final
+ * Run. Use this on serverless (Vercel Functions) where in-memory state
+ * doesn't persist across invocations: the caller gets the full result back
+ * in the response of one HTTP call, so no polling is required.
+ */
+export async function runToCompletion(
+  flight: FlightInput,
+  authToken: string | null,
+  reviewerId?: string,
+): Promise<Run> {
+  const run = newRun(flight, reviewerId);
+  REG.byId.set(run.id, run);
+  await execute(run, authToken);
   return run;
 }
 

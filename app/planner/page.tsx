@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
 import { Check, AlertTriangle, Loader2, Sparkles, FileSignature, Clock, Lock, Zap } from 'lucide-react';
 import { PlannerTabs } from '@/components/PlannerTabs';
-import { AutoPrepareProgress, usePollRun, type AutoPrepareRun } from '@/components/AutoPrepareProgress';
+import { AutoPrepareProgress, type AutoPrepareRun } from '@/components/AutoPrepareProgress';
 
 type PhaseId =
   | 'brief'
@@ -82,7 +82,6 @@ export default function PlannerPage() {
   const [activeRejectPhase, setActiveRejectPhase] = useState<PhaseId | null>(null);
   const [rejectComment, setRejectComment] = useState('');
   const [loading, setLoading] = useState(false);
-  const [autoRunId, setAutoRunId] = useState<string | null>(null);
   const [autoRun, setAutoRun] = useState<AutoPrepareRun | null>(null);
   const [autoBusy, setAutoBusy] = useState(false);
 
@@ -94,7 +93,6 @@ export default function PlannerPage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    setAutoRunId(null);
     setAutoRun(null);
     setAutoBusy(false);
     fetch(`/api/planner/plans/${selectedId}`)
@@ -133,10 +131,9 @@ export default function PlannerPage() {
     if (res.ok) setPlan(await res.json());
   }, [plan, selectedId]);
 
-  // Auto-prepare polling: fold completed phases into the plan as `ready` so
-  // the planner can approve/reject them through the existing per-phase UI.
-  const handleAutoUpdate = useCallback((run: AutoPrepareRun) => {
-    setAutoRun(run);
+  // Fold completed phases into the plan as `ready` so the planner can
+  // approve/reject them through the existing per-phase UI.
+  const applyRunToPlan = useCallback((run: AutoPrepareRun) => {
     if (!plan || released) return;
     const updates: Partial<PhasesMap> = {};
     const runPhaseIds = Object.keys(run.phases) as (keyof typeof run.phases)[];
@@ -158,11 +155,12 @@ export default function PlannerPage() {
     if (Object.keys(updates).length > 0) {
       void persistManyPhases(updates);
     }
-    if (run.status !== 'running') setAutoBusy(false);
   }, [plan, released, persistManyPhases]);
 
-  usePollRun(autoRunId, handleAutoUpdate);
-
+  // POST is synchronous: it returns the full completed Run after all phases
+  // finish (~10–25s for one flight). We replaced the earlier
+  // start-then-poll pattern because the orchestrator's in-memory registry
+  // doesn't survive across Vercel Function invocations.
   const startAutoPrepare = async () => {
     if (!plan || released || autoBusy) return;
     setAutoBusy(true);
@@ -172,9 +170,13 @@ export default function PlannerPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ flight: selected }),
       });
-      const json = (await res.json()) as { runs: { runId: string }[] };
-      setAutoRunId(json.runs?.[0]?.runId ?? null);
-    } catch {
+      const json = (await res.json()) as { runs: { run: AutoPrepareRun }[] };
+      const run = json.runs?.[0]?.run ?? null;
+      if (run) {
+        setAutoRun(run);
+        applyRunToPlan(run);
+      }
+    } finally {
       setAutoBusy(false);
     }
   };
