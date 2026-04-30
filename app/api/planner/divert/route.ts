@@ -4,6 +4,7 @@ import { findCandidatesWithin, greatCircleNM } from '@/lib/perf';
 import { fetchMetars, parseMetarMinima } from '@/lib/aviationweather';
 import type { MetarReport } from '@/lib/aviationweather';
 import { loadOpsSpecs, type AlternateMinima } from '@/lib/ops-specs';
+import { getApiBearer } from '@/lib/api-auth';
 
 type DivertReason = 'medical' | 'mechanical' | 'weather' | 'fuel';
 
@@ -122,8 +123,9 @@ export async function POST(req: NextRequest) {
 
   // Pull the tenant OpsSpec — alternateMinima for ceiling/vis floor, and
   // authorizedAirports for the operator's permitted-stations filter.
-  const auth = req.headers.get('authorization');
-  const token = auth?.startsWith('Bearer ') ? auth.slice(7) : null;
+  // Bearer comes from the NextAuth session cookie via getApiBearer (the
+  // browser fetch from the planner page doesn't send Authorization headers).
+  const token = await getApiBearer(req);
   const opsSpecs = await loadOpsSpecs(token);
   const authorizedSet = new Set(opsSpecs.authorizedAirports.map((s) => s.toUpperCase()));
   const hasAuthList = authorizedSet.size > 0;
