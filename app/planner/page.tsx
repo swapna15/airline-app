@@ -201,23 +201,30 @@ export default function PlannerPage() {
 
   // Fold completed phases into the plan as `ready` so the planner can
   // approve/reject them through the existing per-phase UI.
+  //
+  // Re-running auto-prepare INTENTIONALLY resets previously-approved phases
+  // back to `ready`. Rationale: the planner explicitly asked for fresh
+  // analysis (new METAR / NOTAM / fuel policy / OpsSpecs), so the prior
+  // approval is stale and must be re-reviewed against the new numbers.
+  // Released plans are immutable in the Lambda and are guarded above.
   const applyRunToPlan = useCallback((run: AutoPrepareRun) => {
     if (!plan || !plan.phases || released) return;
     const updates: Partial<PhasesMap> = {};
     const runPhaseIds = Object.keys(run.phases ?? {}) as (keyof typeof run.phases)[];
     for (const id of runPhaseIds) {
       const rp = run.phases[id];
-      const cur = plan.phases[id as PhaseId] ?? { status: 'pending' as const };
-      if (rp?.status === 'ready' && cur.status !== 'approved' && cur.summary !== rp.summary) {
+      if (rp?.status === 'ready') {
         updates[id as PhaseId] = {
           status: 'ready',
           summary: rp.summary,
           source: rp.source,
           data: rp.data,
         };
-      }
-      if (rp?.status === 'failed' && cur.status === 'pending') {
-        updates[id as PhaseId] = { status: 'rejected', comment: rp.error ?? 'auto-prepare failed' };
+      } else if (rp?.status === 'failed') {
+        updates[id as PhaseId] = {
+          status: 'rejected',
+          comment: rp.error ?? 'auto-prepare failed',
+        };
       }
     }
     if (Object.keys(updates).length > 0) {
