@@ -183,8 +183,11 @@ async function listOwnFlightsToday(tenantId: string): Promise<APIGatewayProxyRes
      JOIN airports arr ON arr.code = f.destination_code
      WHERE f.tenant_id = $1
        AND f.status NOT IN ('cancelled')
-       AND f.departure_time >= NOW() - INTERVAL '4 hours'
-       AND f.departure_time <  NOW() + INTERVAL '36 hours'
+       /* Today's full schedule (in UTC) + the next 24h. A dispatcher
+        * reviewing the day's bank should see every flight, including
+        * ones that already departed earlier in the shift. */
+       AND f.departure_time >= DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC')
+       AND f.departure_time <  DATE_TRUNC('day', NOW() AT TIME ZONE 'UTC') + INTERVAL '48 hours'
      ORDER BY f.departure_time`,
     [tenantId],
   );
