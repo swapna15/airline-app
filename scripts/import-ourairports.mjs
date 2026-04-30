@@ -21,7 +21,7 @@
  *                    24h ops/customs/RFF data.
  */
 
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, renameSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -92,6 +92,16 @@ async function main() {
     if (len >= 7500 && r.lighted === '1') etopsRunway.add(r.airport_ident);
   }
 
+  // Verified facts for high-traffic hubs — merged in below over the
+  // OurAirports heuristic. Top-level "_doc" key is informational and ignored.
+  const __dirEarly = dirname(fileURLToPath(import.meta.url));
+  let supplements = {};
+  try {
+    supplements = JSON.parse(readFileSync(join(__dirEarly, 'airport-supplements.json'), 'utf8'));
+  } catch {
+    console.warn('No airport-supplements.json found — every row will be dataQuality:"heuristic".');
+  }
+
   const out = [];
   for (const a of airports) {
     if (a.type !== 'large_airport' && a.type !== 'medium_airport') continue;
@@ -105,6 +115,7 @@ async function main() {
     const isLarge = a.type === 'large_airport';
     const scheduled = a.scheduled_service === 'yes';
     const isUS = a.iso_country === 'US';
+    const sup = supplements[a.ident];
 
     out.push({
       iata: a.iata_code || '',
@@ -113,10 +124,14 @@ async function main() {
       country: a.iso_country || '',
       lat, lon,
       runwayLengthFt,
-      fireCat: isLarge ? 9 : 7,
-      customs: isLarge && scheduled,
+      fireCat:    sup?.fireCat    ?? (isLarge ? 9 : 7),
+      customs:    sup?.customs24h ?? (isLarge && scheduled),
+      // legacy single-grade field kept for back-compat with consumers; new
+      // consumers should use fuelTypes (an array) when present.
       fuel: (isLarge || scheduled) ? (isUS ? 'jet-a' : 'jet-a1') : 'none',
+      fuelTypes:  sup?.fuelTypes  ?? ((isLarge || scheduled) ? [isUS ? 'Jet-A' : 'Jet-A1'] : []),
       etopsAlternate: isLarge && scheduled && etopsRunway.has(a.ident),
+      dataQuality: sup ? 'verified' : 'heuristic',
     });
   }
 
@@ -125,13 +140,19 @@ async function main() {
 
   const __dir = dirname(fileURLToPath(import.meta.url));
   const outPath = join(__dir, '..', 'lib', 'airports.json');
-  writeFileSync(outPath, JSON.stringify(out));
+  // Atomic write — write to .tmp then rename so a partial write can never
+  // leave consumers reading half a file.
+  const tmpPath = outPath + '.tmp';
+  writeFileSync(tmpPath, JSON.stringify(out));
+  renameSync(tmpPath, outPath);
 
+  const verified = out.filter((a) => a.dataQuality === 'verified').length;
   console.log(`Wrote ${out.length} airports to ${outPath}`);
   const withIata = out.filter((a) => a.iata).length;
   console.log(`  ${withIata} have IATA codes; ${out.length - withIata} ICAO-only`);
   console.log(`  customs=true: ${out.filter((a) => a.customs).length}`);
   console.log(`  etopsAlternate=true: ${out.filter((a) => a.etopsAlternate).length}`);
+  console.log(`  dataQuality verified: ${verified}; heuristic: ${out.length - verified}`);
   console.log(`  longest runway: ${Math.max(...out.map((a) => a.runwayLengthFt)).toLocaleString()} ft`);
 }
 

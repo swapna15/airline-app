@@ -21,7 +21,15 @@ const REASONS: { value: Reason; label: string }[] = [
 ];
 
 interface Alternate {
-  airport: { iata: string; icao: string; name: string; runwayLengthFt: number; fireCat: number };
+  airport: {
+    iata: string;
+    icao: string;
+    name: string;
+    runwayLengthFt: number;
+    fireCat: number;
+    dataQuality?: 'verified' | 'heuristic';
+    fuelTypes?: string[];
+  };
   distanceFromOriginNM: number;
   distanceFromDestNM: number;
   fltCat?: 'VFR' | 'MVFR' | 'IFR' | 'LIFR';
@@ -58,6 +66,11 @@ export default function DivertPage() {
   const [reason, setReason] = useState<Reason>('medical');
   const [result, setResult] = useState<DivertResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [verifiedOnly, setVerifiedOnly] = useState(false);
+
+  const visibleAlternates = result?.ranked.filter(
+    (a) => !verifiedOnly || a.airport.dataQuality === 'verified',
+  ) ?? [];
 
   const run = async () => {
     setLoading(true);
@@ -144,8 +157,23 @@ export default function DivertPage() {
             )}
             <span className="ml-2">· source: {result.source}</span>
           </p>
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-xs text-gray-500">
+              {visibleAlternates.length}/{result.ranked.length} alternates
+              {verifiedOnly && ' (verified-data only)'}
+            </p>
+            <label className="flex items-center gap-1.5 text-xs text-gray-600 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={verifiedOnly}
+                onChange={(e) => setVerifiedOnly(e.target.checked)}
+                className="accent-emerald-600"
+              />
+              Verified data only
+            </label>
+          </div>
           <ol className="space-y-2">
-            {result.ranked.map((alt, i) => (
+            {visibleAlternates.map((alt, i) => (
               <li
                 key={alt.airport.iata}
                 className={`border rounded-xl p-4 ${
@@ -170,6 +198,20 @@ export default function DivertPage() {
                           ETOPS
                         </span>
                       )}
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                          alt.airport.dataQuality === 'verified'
+                            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                            : 'bg-gray-50 text-gray-500 border border-gray-200'
+                        }`}
+                        title={
+                          alt.airport.dataQuality === 'verified'
+                            ? 'fireCat / customs / fuel verified from supplements file'
+                            : 'fireCat / customs / fuel derived from OurAirports heuristic'
+                        }
+                      >
+                        {alt.airport.dataQuality === 'verified' ? '✓ verified' : 'heuristic'}
+                      </span>
                     </div>
 
                     <div className="ml-8 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600">

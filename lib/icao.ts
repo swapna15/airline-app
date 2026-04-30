@@ -17,13 +17,24 @@ export interface AirportRef {
   lat: number;
   lon: number;
   runwayLengthFt: number;
-  fireCat: number;    // ICAO RFF category (heuristic: large=9, medium=7)
-  customs: boolean;   // heuristic: large_airport AND scheduled_service=yes
+  /** ICAO RFF category 1–10. From scripts/airport-supplements.json when
+   *  dataQuality === 'verified', else heuristic (large=9, medium=7). */
+  fireCat: number;
+  /** Whether the airport has 24-hour customs. From the supplement file when
+   *  verified, else the (scheduled-service AND large) heuristic. */
+  customs: boolean;
+  /** @deprecated Use fuelTypes (array). Single-grade kept for back-compat. */
   fuel: 'jet-a' | 'jet-a1' | 'none';
+  /** Available fuel grades. May be empty if the airport offers none. */
+  fuelTypes: string[];
   /** Heuristic ETOPS-alternate flag: large_airport + scheduled_service +
    *  ≥ 7,500 ft lit paved runway. Real ETOPS-rated alternates also need
    *  24h customs/RFF/CAT II ILS — replace with Jeppesen for prod. */
   etopsAlternate: boolean;
+  /** 'verified' if this airport's fireCat / customs / fuelTypes came from
+   *  scripts/airport-supplements.json; 'heuristic' if derived from
+   *  OurAirports size + scheduled_service. */
+  dataQuality: 'verified' | 'heuristic';
 }
 
 const ALL: AirportRef[] = airportsJson as AirportRef[];
