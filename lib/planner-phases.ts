@@ -201,18 +201,32 @@ export async function aircraft(f: OwnFlight, authToken: string | null): Promise<
   // current METAR for each, and compute the three critical-fuel scenarios.
   const ops = await loadOpsSpecs(authToken);
   const twin = isTwinEngine(acft);
-  // OpsSpecs authorizedTypes are ICAO codes (B77W, A333, A359). Match the
-  // canonical aircraftIcao first; fall back to a permissive substring match
-  // against the marketing name (Boeing 777-300ER) so older mock data
-  // without aircraftIcao still works.
+  // OpsSpecs authorizedTypes are typically ICAO codes (B77W, A333, A359).
+  // Three-step match:
+  //   1. exact ICAO match against aircraftIcao
+  //   2. ICAO-family match — B77W vs B77L vs B772 all share the '77' family
+  //   3. permissive substring match against the marketing name (e.g.,
+  //      'Boeing 777' contains '777')
+  // Step 2 lets a tenant authorize the whole 777 family with a single
+  // 'B77W' entry instead of listing every variant.
   const acftIcao = (f.aircraftIcao ?? '').toUpperCase();
   const acftTypeFlat = acft.toUpperCase().replace(/\s+/g, '').replace(/-/g, '');
+  const familyToken = (code: string): string => {
+    // e.g. B77W → 77, A333 → 33, A359 → 35, B789 → 78, A388 → 38
+    const m = code.match(/[A-Z]([0-9]{2})/);
+    return m ? m[1] : '';
+  };
   const typeAuthorized = ops.etopsApproval.authorizedTypes.length === 0
     || ops.etopsApproval.authorizedTypes.some((t) => {
         const tt = t.toUpperCase().replace(/\s+/g, '').replace(/-/g, '');
         if (!tt) return false;
         if (acftIcao && acftIcao === tt) return true;
-        return acftTypeFlat.includes(tt);
+        if (acftIcao && familyToken(acftIcao) && familyToken(acftIcao) === familyToken(tt)) return true;
+        if (acftTypeFlat.includes(tt)) return true;
+        // family numeric token in marketing name — '777' inside 'BOEING777'
+        const fam = familyToken(tt);
+        if (fam && acftTypeFlat.includes(fam)) return true;
+        return false;
       });
 
   // First-pass ETOPS trigger: twin + > 1500nm great-circle. Real planning

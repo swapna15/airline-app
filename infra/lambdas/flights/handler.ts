@@ -196,36 +196,50 @@ async function listOwnFlightsToday(tenantId: string): Promise<APIGatewayProxyRes
   // OpsSpecs B044 authorizedTypes is keyed by ICAO codes, so the planner
   // needs both representations to do an exact match without dragging the
   // matching code through every consumer.
+  // Marketing name → ICAO type code. Order: most-specific variant first,
+  // then the bare family (the seeded flights stash 'Boeing 777' without a
+  // variant suffix, so we default to the most common widebody variant).
   const deriveIcao = (m: string | undefined): string | undefined => {
     const t = (m ?? '').toUpperCase();
     if (!t) return undefined;
-    if (t.includes('777-300ER') || t.includes('777-300') || t.includes('77W')) return 'B77W';
-    if (t.includes('777-200LR')) return 'B77L';
+    // 777
+    if (t.includes('777-300ER') || t.includes('77W'))     return 'B77W';
+    if (t.includes('777-200LR'))                          return 'B77L';
     if (t.includes('777-200ER') || t.includes('777-200')) return 'B772';
     if (t.includes('777X') || t.includes('777-9'))        return 'B779';
-    if (t.includes('787-10'))    return 'B78X';
-    if (t.includes('787-9'))     return 'B789';
-    if (t.includes('787-8') || t.includes('787'))         return 'B788';
-    if (t.includes('747-8'))     return 'B748';
-    if (t.includes('747-400'))   return 'B744';
-    if (t.includes('747'))       return 'B744';
-    if (t.includes('A330-900'))  return 'A339';
-    if (t.includes('A330-300'))  return 'A333';
-    if (t.includes('A330-200'))  return 'A332';
-    if (t.includes('A330'))      return 'A333';
-    if (t.includes('A350-1000')) return 'A35K';
+    if (t.includes('777-300'))                            return 'B77W';
+    if (t.includes('777'))                                return 'B77W'; // family default
+    // 787
+    if (t.includes('787-10'))                             return 'B78X';
+    if (t.includes('787-9'))                              return 'B789';
+    if (t.includes('787-8'))                              return 'B788';
+    if (t.includes('787'))                                return 'B789';
+    // 747
+    if (t.includes('747-8'))                              return 'B748';
+    if (t.includes('747-400') || t.includes('747'))       return 'B744';
+    // A330
+    if (t.includes('A330-900') || t.includes('A330NEO'))  return 'A339';
+    if (t.includes('A330-300'))                           return 'A333';
+    if (t.includes('A330-200'))                           return 'A332';
+    if (t.includes('A330'))                               return 'A333';
+    // A350
+    if (t.includes('A350-1000'))                          return 'A35K';
     if (t.includes('A350-900') || t.includes('A350'))     return 'A359';
-    if (t.includes('A380'))      return 'A388';
-    if (t.includes('A340'))      return 'A343';
-    if (t.includes('A321'))      return 'A321';
-    if (t.includes('A320'))      return 'A320';
-    if (t.includes('A319'))      return 'A319';
-    if (t.includes('737-900'))   return 'B739';
-    if (t.includes('737-800') || t.includes('737NG'))     return 'B738';
+    // A380
+    if (t.includes('A380'))                               return 'A388';
+    // A340 / A320 family
+    if (t.includes('A340'))                               return 'A343';
+    if (t.includes('A321'))                               return 'A321';
+    if (t.includes('A320'))                               return 'A320';
+    if (t.includes('A319'))                               return 'A319';
+    // 737 family
+    if (t.includes('737-900'))                            return 'B739';
     if (t.includes('737 MAX 8') || t.includes('737-8'))   return 'B38M';
-    if (t.includes('737'))       return 'B738';
-    if (t.includes('MD-11'))     return 'MD11';
-    if (t.includes('E190'))      return 'E190';
+    if (t.includes('737-800') || t.includes('737NG'))     return 'B738';
+    if (t.includes('737'))                                return 'B738';
+    // Misc / regional
+    if (t.includes('MD-11'))                              return 'MD11';
+    if (t.includes('E190'))                               return 'E190';
     if (t.includes('CRJ-900') || t.includes('CRJ900'))    return 'CRJ9';
     return undefined;
   };
