@@ -93,6 +93,24 @@ export const handler = async (event: APIGatewayProxyEvent): Promise<APIGatewayPr
 
     if (method === 'POST' && path === '/users/register') return register(event.body);
     if (method === 'POST' && path === '/users/login')    return login(event.body);
+    if (method === 'GET'  && path === '/users/auth-debug') {
+      // Public diagnostic — returns a SHA-256 of NEXTAUTH_SECRET so callers
+      // can compare it byte-for-byte with the value the frontend signs with,
+      // without exposing the secret. Hash of high-entropy random bytes is
+      // computationally safe to publish.
+      const crypto = await import('crypto');
+      const secret = process.env.NEXTAUTH_SECRET ?? '';
+      const hash = crypto.createHash('sha256').update(secret, 'utf8').digest('hex');
+      return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nextauth_secret_present: secret.length > 0,
+          nextauth_secret_sha256:  hash,
+          nextauth_secret_length:  secret.length,
+        }),
+      };
+    }
     if (method === 'GET'  && userId)                     return getUser(userId);
     if (method === 'PATCH' && userId)                    return updateRole(userId, event.body, requestorRole);
 

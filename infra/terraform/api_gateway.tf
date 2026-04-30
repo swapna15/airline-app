@@ -78,6 +78,12 @@ resource "aws_api_gateway_resource" "users_register" {
   path_part   = "register"
 }
 
+resource "aws_api_gateway_resource" "users_auth_debug" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.users.id
+  path_part   = "auth-debug"
+}
+
 resource "aws_api_gateway_resource" "users_login" {
   rest_api_id = aws_api_gateway_rest_api.main.id
   parent_id   = aws_api_gateway_resource.users.id
@@ -303,6 +309,7 @@ locals {
     # Users — public (no authorizer)
     "POST-users-register"          = { method = "POST",   resource_id = aws_api_gateway_resource.users_register.id,              lambda_arn = aws_lambda_function.users.invoke_arn,    auth = false },
     "POST-users-login"             = { method = "POST",   resource_id = aws_api_gateway_resource.users_login.id,                  lambda_arn = aws_lambda_function.users.invoke_arn,    auth = false },
+    "GET-users-auth-debug"         = { method = "GET",    resource_id = aws_api_gateway_resource.users_auth_debug.id,             lambda_arn = aws_lambda_function.users.invoke_arn,    auth = false },
     "GET-users-id"                 = { method = "GET",    resource_id = aws_api_gateway_resource.users_id.id,                     lambda_arn = aws_lambda_function.users.invoke_arn,    auth = true  },
     "PATCH-users-id-role"          = { method = "PATCH",  resource_id = aws_api_gateway_resource.users_id_role.id,                lambda_arn = aws_lambda_function.users.invoke_arn,    auth = true  },
 
