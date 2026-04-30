@@ -74,8 +74,21 @@ const STORE: Store = ((globalThis as unknown) as { __plannerStore?: Store }).__p
   ?? { plans: new Map(), reviews: [] };
 ((globalThis as unknown) as { __plannerStore?: Store }).__plannerStore = STORE;
 
+/**
+ * Backfill any missing phase keys with the default `pending` shape so the
+ * loaded plan always satisfies Req 10.2 — the phases map always contains
+ * exactly the 8 canonical keys, regardless of what was originally saved.
+ */
+function normalizePhases(input: Partial<Record<PhaseId, PhaseState>> | undefined): Record<PhaseId, PhaseState> {
+  return { ...emptyPhases(), ...(input ?? {}) };
+}
+
 export function getPlan(flightId: string): FlightPlan | undefined {
-  return STORE.plans.get(flightId);
+  const p = STORE.plans.get(flightId);
+  if (!p) return undefined;
+  // Defense in depth — even if a previous save bypassed savePlan() (older
+  // code path, direct STORE manipulation in tests), normalize on read.
+  return { ...p, phases: normalizePhases(p.phases) };
 }
 
 export function getOrCreatePlan(flightId: string): FlightPlan {
@@ -91,11 +104,23 @@ export function getOrCreatePlan(flightId: string): FlightPlan {
     };
     STORE.plans.set(flightId, plan);
   }
-  return plan;
+  return { ...plan, phases: normalizePhases(plan.phases) };
 }
 
+export class PlannerStoreError extends Error {}
+
 export function savePlan(plan: FlightPlan): FlightPlan {
-  const next = { ...plan, updatedAt: new Date().toISOString() };
+  // Req 10.4 — reject malformed records at the boundary instead of silently
+  // creating a corrupt row. flightId is the primary key in every backend
+  // we'll plug in; an empty string is never valid.
+  if (!plan.flightId || typeof plan.flightId !== 'string') {
+    throw new PlannerStoreError('savePlan: flightId is required and must be a non-empty string');
+  }
+  const next: FlightPlan = {
+    ...plan,
+    phases: normalizePhases(plan.phases),
+    updatedAt: new Date().toISOString(),
+  };
   STORE.plans.set(plan.flightId, next);
   return next;
 }
