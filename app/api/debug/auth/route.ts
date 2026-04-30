@@ -18,8 +18,10 @@ import { createHash } from 'crypto';
  * already in your cookie).
  */
 
-const SECRET  = process.env.NEXTAUTH_SECRET ?? '';
-const API_URL = process.env.NEXT_PUBLIC_API_URL;
+const SECRET       = process.env.NEXTAUTH_SECRET ?? '';
+const API_URL      = process.env.NEXT_PUBLIC_API_URL;
+const NEXTAUTH_URL = process.env.NEXTAUTH_URL ?? '';
+const VERCEL_URL   = process.env.VERCEL_URL ?? '';
 
 function sha256Hex(s: string): string {
   return createHash('sha256').update(s, 'utf8').digest('hex');
@@ -36,11 +38,21 @@ function decodeJwtSegments(token: string): { header?: unknown; payload?: unknown
 }
 
 export async function GET(req: NextRequest) {
+  const requestHost = req.headers.get('host') ?? '';
+  const requestProto = req.headers.get('x-forwarded-proto') ?? 'https';
+  const expectedNextauthUrl = `${requestProto}://${requestHost}`;
+
   const result: Record<string, unknown> = {
     nextauth_secret_present: SECRET.length > 0,
     nextauth_secret_sha256:  SECRET ? sha256Hex(SECRET) : null,
     nextauth_secret_length:  SECRET.length,
-    api_url: API_URL ?? null,
+    api_url:        API_URL ?? null,
+    nextauth_url:   NEXTAUTH_URL || null,
+    vercel_url:     VERCEL_URL   || null,
+    request_host:   requestHost,
+    request_origin: expectedNextauthUrl,
+    nextauth_url_matches_request_origin:
+      NEXTAUTH_URL.replace(/\/$/, '') === expectedNextauthUrl,
   };
 
   // Raw cookie token (this is the same string getApiBearer forwards to the Lambda).
