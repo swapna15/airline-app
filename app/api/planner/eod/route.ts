@@ -1,6 +1,5 @@
-import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { getApiBearer } from '@/lib/api-auth';
 import { ROTATIONS } from '@/lib/fleet';
 import { getPlan, listReviews, type PhaseId } from '@/lib/planner-store';
 
@@ -16,10 +15,8 @@ interface PlanCounts {
   source: string;
 }
 
-async function planCountsFromLambda(): Promise<PlanCounts | null> {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return null;
-  const token = (session as { accessToken?: string }).accessToken;
+async function planCountsFromLambda(req: NextRequest): Promise<PlanCounts | null> {
+  const token = await getApiBearer(req);
   if (!token) return null;
   const res = await fetch(`${API_URL}/planning/eod-stats`, {
     headers: { Authorization: `Bearer ${token}` },
@@ -64,7 +61,7 @@ function planCountsFromStore(): PlanCounts {
   };
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   // Static rotation/airport data is always local — the Lambda only owns
   // plan/review aggregates from Postgres.
   const allLegs = ROTATIONS.flatMap((r) =>
@@ -72,7 +69,7 @@ export async function GET() {
   );
   const totalPax = allLegs.reduce((s, l) => s + l.paxLoad, 0);
 
-  const counts = (API_URL && (await planCountsFromLambda())) || planCountsFromStore();
+  const counts = (API_URL && (await planCountsFromLambda(req))) || planCountsFromStore();
 
   return NextResponse.json({
     generatedAt: new Date().toISOString(),

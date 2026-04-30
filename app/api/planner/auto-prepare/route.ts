@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getServerSession } from 'next-auth';
 import { authOptions } from '@/auth';
+import { getApiBearer } from '@/lib/api-auth';
 import { startRun, listRuns } from '@/lib/planner-orchestrator';
 import type { FlightInput } from '@/lib/planner-phases';
 
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest) {
   const session = await getServerSession(authOptions);
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   const reviewerId = (session.user as { email?: string }).email ?? 'anonymous';
-  const authToken  = (session as { accessToken?: string }).accessToken ?? null;
+  const authToken  = await getApiBearer(req);
 
   const body = (await req.json()) as PostBody;
   const flights: FlightInput[] = body.flights ?? (body.flight ? [body.flight] : []);

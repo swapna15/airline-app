@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/auth';
+import { getApiBearer } from '@/lib/api-auth';
 import { runPhase, VALID_PHASES, type PhaseId, type FlightInput } from '@/lib/planner-phases';
 
 export async function POST(
@@ -11,8 +10,7 @@ export async function POST(
     return NextResponse.json({ error: `unknown phase: ${params.phase}` }, { status: 400 });
   }
 
-  const session = await getServerSession(authOptions);
-  const authToken = (session as { accessToken?: string } | null)?.accessToken ?? null;
+  const authToken = await getApiBearer(req);
 
   const body = await req.json() as { flight?: FlightInput };
   if (!body.flight) {

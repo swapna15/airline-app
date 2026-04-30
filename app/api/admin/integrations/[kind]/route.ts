@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/auth';
+import { getApiBearer } from '@/lib/api-auth';
 import {
   ALL_KINDS, setIntegrationConfig, deleteIntegrationConfig,
   type IntegrationKind,
@@ -12,12 +11,6 @@ import { resetCrewProvider }      from '@/lib/integrations/crew/resolver';
 export const maxDuration = 30;
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
-
-async function authToken() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return null;
-  return (session as { accessToken?: string }).accessToken;
-}
 
 function isValidKind(s: string): s is IntegrationKind {
   return (ALL_KINDS as string[]).includes(s);
@@ -45,7 +38,7 @@ export async function PUT(req: NextRequest, { params }: { params: { kind: string
   }
 
   if (API_URL) {
-    const token = await authToken();
+    const token = await getApiBearer(req);
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const res = await fetch(`${API_URL}/admin/integrations/${params.kind}`, {
       method: 'PUT',
@@ -67,13 +60,13 @@ export async function PUT(req: NextRequest, { params }: { params: { kind: string
   return NextResponse.json(saved);
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: { kind: string } }) {
+export async function DELETE(req: NextRequest, { params }: { params: { kind: string } }) {
   if (!isValidKind(params.kind)) {
     return NextResponse.json({ error: `unknown integration kind: ${params.kind}` }, { status: 400 });
   }
 
   if (API_URL) {
-    const token = await authToken();
+    const token = await getApiBearer(req);
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const res = await fetch(`${API_URL}/admin/integrations/${params.kind}`, {
       method: 'DELETE',

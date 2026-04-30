@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/auth';
+import { getApiBearer } from '@/lib/api-auth';
 import { ALL_KINDS, setLastHealth, type IntegrationKind } from '@/lib/integrations/config-store';
 import { buildFuelPriceProvider } from '@/lib/integrations/fuelprices/resolver';
 import { buildMelProvider }       from '@/lib/integrations/mel/resolver';
@@ -10,12 +9,6 @@ import type { Provider } from '@/lib/integrations/types';
 export const maxDuration = 30;
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
-
-async function authToken() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return null;
-  return (session as { accessToken?: string }).accessToken;
-}
 
 /**
  * Run a health check against an arbitrary provider configuration without
@@ -69,7 +62,7 @@ export async function POST(req: NextRequest, { params }: { params: { kind: strin
     if (API_URL) {
       // Persist lastHealth on the DB row via the integrations Lambda. The lambda
       // does its own lightweight validation; we don't gate on its response.
-      const token = await authToken();
+      const token = await getApiBearer(req);
       if (token) {
         await fetch(`${API_URL}/admin/integrations/${params.kind}/test?save=true`, {
           method: 'POST',

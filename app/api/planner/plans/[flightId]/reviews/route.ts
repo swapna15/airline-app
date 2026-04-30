@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/auth';
+import { getApiBearer } from '@/lib/api-auth';
 import { appendReview, listReviews, type PhaseId, type ReviewEvent } from '@/lib/planner-store';
 
 export const maxDuration = 30;
@@ -12,18 +11,12 @@ const VALID_PHASES: ReadonlySet<string> = new Set([
 ]);
 const VALID_ACTIONS: ReadonlySet<string> = new Set(['approve', 'reject', 'release']);
 
-async function authToken() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return null;
-  return (session as { accessToken?: string }).accessToken;
-}
-
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { flightId: string } },
 ) {
   if (API_URL) {
-    const token = await authToken();
+    const token = await getApiBearer(req);
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const res = await fetch(`${API_URL}/planning/flight-plans/${params.flightId}/reviews`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -50,7 +43,7 @@ export async function POST(
   }
 
   if (API_URL) {
-    const token = await authToken();
+    const token = await getApiBearer(req);
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const res = await fetch(`${API_URL}/planning/flight-plans/${params.flightId}/reviews`, {
       method: 'POST',

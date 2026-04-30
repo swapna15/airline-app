@@ -1,24 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/auth';
+import { getApiBearer } from '@/lib/api-auth';
 import { getOrCreatePlan, savePlan, type FlightPlan } from '@/lib/planner-store';
 
 export const maxDuration = 30;
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
 
-async function authToken() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return null;
-  return (session as { accessToken?: string }).accessToken;
-}
-
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: { flightId: string } },
 ) {
   if (API_URL) {
-    const token = await authToken();
+    const token = await getApiBearer(req);
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const res = await fetch(`${API_URL}/planning/flight-plans/${params.flightId}`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -35,7 +28,7 @@ export async function PUT(
   const body = await req.json() as Partial<FlightPlan>;
 
   if (API_URL) {
-    const token = await authToken();
+    const token = await getApiBearer(req);
     if (!token) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     const res = await fetch(`${API_URL}/planning/flight-plans/${params.flightId}`, {
       method: 'PUT',

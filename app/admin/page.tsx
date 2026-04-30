@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { Users, Plane, DollarSign, TrendingUp, Settings, ChevronDown, Loader2, Building2, Save, Check } from 'lucide-react';
+import Link from 'next/link';
+import { Users, Plane, DollarSign, TrendingUp, Settings, ChevronDown, Loader2, Building2, Save, Check, ServerCog, ArrowRight } from 'lucide-react';
 import type { UserRole } from '@/types/roles';
 import { ROLE_LABELS } from '@/types/roles';
 import { AirlineLogo } from '@/components/AirlineLogo';
@@ -67,7 +68,7 @@ interface DuffelOrder {
 export default function AdminPage() {
   const [users, setUsers] = useState(MOCK_USERS);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<'users' | 'bookings' | 'tenant' | 'config'>('users');
+  const [activeTab, setActiveTab] = useState<'users' | 'bookings' | 'tenant' | 'config' | 'flight_planning'>('users');
   const [orders, setOrders] = useState<DuffelOrder[]>([]);
   const [ordersLoading, setOrdersLoading] = useState(false);
   const { tenant, allTenants, setTenantId } = useTenant();
@@ -174,7 +175,7 @@ export default function AdminPage() {
 
       {/* Tabs */}
       <div className="flex gap-1 p-1 bg-gray-100 rounded-lg w-fit mb-6">
-        {(['users', 'bookings', 'tenant', 'config'] as const).map((tab) => (
+        {(['users', 'bookings', 'tenant', 'config', 'flight_planning'] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => { setActiveTab(tab); if (tab === 'tenant') setEditTenant(tenant); }}
@@ -185,7 +186,8 @@ export default function AdminPage() {
             {tab === 'users' ? 'User Management'
               : tab === 'bookings' ? 'Bookings'
               : tab === 'tenant' ? 'Tenant Config'
-              : 'Airline Config'}
+              : tab === 'config' ? 'Airline Config'
+              : 'Flight Planning'}
           </button>
         ))}
       </div>
@@ -519,6 +521,37 @@ export default function AdminPage() {
           <button className="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 transition-colors">
             Save Configuration
           </button>
+        </div>
+      )}
+
+      {activeTab === 'flight_planning' && (
+        <div className="bg-white rounded-xl border border-gray-200 p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Plane size={16} className="text-gray-500" />
+            <h3 className="font-semibold text-gray-900">Flight Planning</h3>
+          </div>
+          <p className="text-sm text-gray-500 mb-4">
+            Configure data sources and runtime settings for the dispatcher workflow.
+          </p>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Link
+              href="/admin/integrations"
+              className="group flex items-start gap-3 p-4 rounded-xl border border-gray-200 hover:border-amber-300 hover:bg-amber-50/40 transition-colors"
+            >
+              <div className="w-10 h-10 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                <ServerCog size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-sm text-gray-900">Data integrations</p>
+                  <ArrowRight size={14} className="text-gray-400 group-hover:text-amber-600 transition-colors" />
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Fuel prices, MEL deferrals, crew roster — switch between mock, CSV, and live REST APIs.
+                </p>
+              </div>
+            </Link>
+          </div>
         </div>
       )}
     </div>

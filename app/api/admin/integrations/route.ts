@@ -1,6 +1,5 @@
-import { NextResponse } from 'next/server';
-import { getServerSession } from 'next-auth';
-import { authOptions } from '@/auth';
+import { NextRequest, NextResponse } from 'next/server';
+import { getApiBearer } from '@/lib/api-auth';
 import {
   ALL_KINDS, listIntegrationConfigs,
   type IntegrationKind, type IntegrationConfig,
@@ -9,12 +8,6 @@ import {
 export const maxDuration = 30;
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL;
-
-async function authToken() {
-  const session = await getServerSession(authOptions);
-  if (!session?.user) return null;
-  return (session as { accessToken?: string }).accessToken;
-}
 
 interface LambdaIntegrationRow {
   kind: IntegrationKind;
@@ -114,9 +107,9 @@ function buildEffective(stored: Map<IntegrationKind, { kind: IntegrationKind; pr
   });
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   if (API_URL) {
-    const token = await authToken();
+    const token = await getApiBearer(req);
     if (token) {
       try {
         const res = await fetch(`${API_URL}/admin/integrations`, {
