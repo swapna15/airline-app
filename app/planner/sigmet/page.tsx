@@ -9,6 +9,7 @@ import {
   type HazardCategory, type ClassifiedSigmet,
 } from '@/lib/sigmet-classifier';
 import type { SigmetBoardResponse } from '@/app/api/planner/sigmet/route';
+import { firLabel } from '@shared/semantic/fir';
 
 // Leaflet touches `window` at module load, so the map must be client-only.
 const SigmetMap = dynamic(() => import('@/components/SigmetMap'), {
@@ -163,7 +164,9 @@ export default function SigmetPage() {
                     <div className="flex items-center gap-2 mb-1">
                       <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
                       <span className="text-xs font-semibold uppercase tracking-wide">{s.hazard ?? 'unknown'}</span>
-                      <span className="text-xs text-gray-500">· {s.firId ?? '—'}</span>
+                      <span className="text-xs text-gray-500" title={s.firId ?? '—'}>
+                        · {firLabel(s.firId, s.firId ?? '—')}
+                      </span>
                     </div>
                     <p className="text-xs text-gray-700">
                       FL {s.minFL ?? '?'}–{s.maxFL ?? '?'}

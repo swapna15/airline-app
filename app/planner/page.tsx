@@ -8,6 +8,7 @@ import { AutoPrepareProgress, type AutoPrepareRun } from '@/components/AutoPrepa
 import { readNdjson } from '@/lib/ndjson';
 import type { OwnFlight } from '@shared/schema/flight';
 import { displayFlightNo, displayDepartureTime } from '@/lib/flight-display';
+import { airlineLabel } from '@shared/semantic/airline';
 
 type PhaseId =
   | 'brief'
@@ -404,6 +405,7 @@ export default function PlannerPage() {
                   <Clock size={11} /> {displayDepartureTime(f.scheduledDeparture)}
                 </span>
               </div>
+              <p className="text-xs text-gray-500">{airlineLabel(f.carrier, f.carrier)}</p>
               <p className="text-sm text-gray-600">{f.origin} → {f.destination}</p>
               <p className="text-xs text-gray-400 mt-1">{f.aircraftType ?? f.aircraftIcao} · {f.paxLoad ?? 0} pax</p>
             </button>
