@@ -19,16 +19,17 @@
 2. [The three layers explained](#2-the-three-layers-explained)
 3. [Who uses what (personas + pages)](#3-who-uses-what-personas--pages)
 4. [Multi-tenancy — how SaaS works here](#4-multi-tenancy--how-saas-works-here)
-5. [**Complete feature inventory**](#5-complete-feature-inventory)
-6. [Onboarding a new airline (end-to-end walkthrough)](#6-onboarding-a-new-airline-end-to-end-walkthrough)
-7. [Dispatch core — what the engines compute](#7-dispatch-core--what-the-engines-compute)
-8. [GAAS AI layer — what the agents do](#8-gaas-ai-layer--what-the-agents-do)
-9. [Installation](#9-installation)
-10. [Configuration reference (every per-tenant knob)](#10-configuration-reference-every-per-tenant-knob)
-11. [Testing](#11-testing)
-12. [Pending items / roadmap](#12-pending-items--roadmap)
-13. [Glossary](#13-glossary)
-14. [Appendix — file map](#14-appendix--file-map)
+5. [Complete feature inventory](#5-complete-feature-inventory)
+6. [**Architecture diagrams**](#6-architecture-diagrams)
+7. [Onboarding a new airline (end-to-end walkthrough)](#7-onboarding-a-new-airline-end-to-end-walkthrough)
+8. [Dispatch core — what the engines compute](#8-dispatch-core--what-the-engines-compute)
+9. [GAAS AI layer — what the agents do](#9-gaas-ai-layer--what-the-agents-do)
+10. [Installation](#10-installation)
+11. [Configuration reference (every per-tenant knob)](#11-configuration-reference-every-per-tenant-knob)
+12. [Testing](#12-testing)
+13. [Pending items / roadmap](#13-pending-items--roadmap)
+14. [Glossary](#14-glossary)
+15. [Appendix — file map](#15-appendix--file-map)
 
 ---
 
@@ -557,7 +558,434 @@ A future "white-label domain" feature would map `aerospica.airlineos.app` → `t
 
 ---
 
-## 6. Onboarding a new airline (end-to-end walkthrough)
+## 6. Architecture diagrams
+
+All diagrams below render as Mermaid on GitHub and most modern markdown viewers. They are the
+visual companion to §2–§5 — read them in this order:
+
+- **6.1** Three-layer architecture (the big picture)
+- **6.2** AWS + Vercel infrastructure topology
+- **6.3** Multi-tenant request flow (how isolation works on the wire)
+- **6.4** Persona × page × backend matrix
+- **6.5** Multi-agent + RAG flow (what happens when a planner clicks "Brief")
+- **6.6** GAAS reuse map (which agents share the substrate, which don't)
+- **6.7** RAG pipeline detail
+- **6.8** Tenant onboarding sequence
+
+### 6.1 Three-layer architecture
+
+The single most important picture. Layer 3 augments Layer 2; if Layer 3 is down, Layers 1+2
+still produce a legal release with all numbers — the prose summary is the only thing missing.
+
+```mermaid
+flowchart TB
+    subgraph L3["Layer 3 — GAAS AI (re-phrasing + retrieval)"]
+        direction LR
+        BA[BriefAgent] --- RA[RouteAgent] --- FA[FuelAgent] --- AA[AircraftAgent] --- REL[ReleaseAgent]
+        ORCH[PlannerOrchestrator]
+        BA --> ORCH
+        RA --> ORCH
+        FA --> ORCH
+        AA --> ORCH
+        REL --> ORCH
+        subgraph SUB["GAAS Substrate (lib/ai/)"]
+            direction LR
+            RAG[RAG Retrieval] --- MEM[Tenant Memory] --- VEC[Vector Store] --- EMB[Embeddings]
+        end
+        ORCH --> RAG
+        RAG --> VEC
+        MEM --> VEC
+        VEC --> EMB
+    end
+
+    subgraph L2["Layer 2 — Dispatch core (deterministic, regulated)"]
+        direction LR
+        PERF[Perf / great-circle]
+        ETOPS[ETOPS critical fuel]
+        OPSP[OpsSpecs loader]
+        PBN[PBN validator]
+        MEL[MEL]
+        CREW[Crew + Fatigue]
+        TAF[TAF window parser]
+        ONT[Ontologies: aircraft / airline / FIR / airport]
+    end
+
+    subgraph L1["Layer 1 — SaaS shell (multi-tenant)"]
+        direction LR
+        TENANTS[(tenants)]
+        USERS[(users)]
+        JWT[NextAuth JWT HS256]
+        RBAC[Route RBAC middleware]
+        RLS[Postgres RLS policies]
+        ADAPT[Adapters: Mock / Duffel / Lambda]
+        INTEG[Pluggable integrations: fuel / MEL / crew]
+        BRAND[Brand + AI prefs config]
+    end
+
+    L3 -->|reads facts| L2
+    L2 -->|reads tenant config| L1
+    L3 -.->|writes audit log| L1
+```
+
+### 6.2 AWS + Vercel infrastructure
+
+Provisioned by Terraform (`infra/terraform/`). Frontend on Vercel; everything regulated /
+stateful in AWS. Anthropic + Voyage are the only external AI dependencies; everything else
+flows through tenant-configured integrations.
+
+```mermaid
+flowchart LR
+    subgraph CLIENT["Client"]
+        Browser
+    end
+
+    subgraph VERCEL["Vercel (Edge / Fluid Compute)"]
+        NextJS["Next.js App Router<br/>app/page.tsx + app/planner/**<br/>+ app/admin/**"]
+        Bridge["API Routes Bridge<br/>app/api/**/route.ts"]
+    end
+
+    subgraph AWS["AWS Region"]
+        APIGW["API Gateway REST<br/>+ JWT Token Authorizer"]
+        AuthFn["authorizer Lambda<br/>(jose HS256)"]
+
+        subgraph FNS["Product Lambdas (Node.js 22)"]
+            direction LR
+            UsersFn[users]
+            FlightsFn[flights]
+            BookingsFn[bookings]
+            CheckinFn[checkin]
+            GateFn[gate]
+            AdminFn[admin]
+            DispFn[dispatchers]
+            IntegFn[integrations]
+            PlanFn[planning]
+            MigFn[migrate]
+        end
+
+        subgraph DATA["Data plane (private subnet)"]
+            RDSProxy["RDS Proxy"]
+            Aurora["(Aurora<br/>Serverless v2<br/>+ pgvector)"]
+            Secrets["Secrets Manager"]
+        end
+
+        VPC["VPC + NAT"]
+    end
+
+    subgraph EXTAI["External AI"]
+        direction TB
+        Anthropic["Anthropic<br/>claude-sonnet-4-6"]
+        Voyage["Voyage AI<br/>voyage-3 embeddings"]
+    end
+
+    subgraph EXT["External data feeds (per-tenant config)"]
+        direction TB
+        AvWX[aviationweather.gov]
+        FAA[FAA NOTAM Search]
+        Duffel[Duffel API]
+        FuelAPI["Tenant fuel-price API<br/>(api_fms / CSV)"]
+        MELAPI["Tenant MEL API<br/>(AMOS / TRAX / CAMO)"]
+        CrewAPI["Tenant crew API<br/>(Sabre / Jeppesen / AIMS)"]
+    end
+
+    Browser <--> NextJS
+    NextJS <--> Bridge
+    Bridge -->|JWT| APIGW
+    Bridge --> Anthropic
+    Bridge --> Voyage
+    Bridge --> AvWX
+    Bridge --> FAA
+    Bridge --> Duffel
+    Bridge --> FuelAPI
+    Bridge --> MELAPI
+    Bridge --> CrewAPI
+    APIGW --> AuthFn
+    AuthFn -->|inject userId, role,<br/>tenantSlug| APIGW
+    APIGW --> FNS
+    FNS --> RDSProxy
+    RDSProxy --> Aurora
+    RDSProxy --> Secrets
+    FNS -.runs in.-> VPC
+```
+
+### 6.3 Multi-tenant request flow
+
+The single picture that answers "how does AirlineOS prevent tenant A from seeing tenant B's
+data?" Three independent enforcement layers — JWT, app-level resolver, Postgres RLS — must
+all align for a row to be returned.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant V as Vercel<br/>Next.js
+    participant G as API Gateway
+    participant AZ as Authorizer<br/>Lambda
+    participant L as Product<br/>Lambda
+    participant PG as Aurora<br/>(RLS enforced)
+
+    B->>V: GET /planner with NextAuth cookie
+    V->>V: NextAuth verify JWT (HS256, jose)
+    V->>G: forward request, Authorization: Bearer <jwt>
+    G->>AZ: validate token
+    AZ-->>G: { userId, role, tenantSlug }
+    G->>L: invoke with request context
+    L->>L: resolveTenantId(tenantSlug) → UUID
+    L->>PG: SET LOCAL app.tenant_id = '<uuid>'
+    L->>PG: SELECT * FROM flight_plans
+    Note over PG: RLS policy:<br/>USING (tenant_id = current_setting('app.tenant_id'))
+    PG-->>L: ONLY this tenant's rows
+    L-->>G: response
+    G-->>V: response
+    V-->>B: JSON
+```
+
+### 6.4 Persona × page × backend
+
+Who hits which page, which page hits which backend, which backend hits which engines.
+
+```mermaid
+flowchart LR
+    subgraph PERS["Personas"]
+        P1[Passenger]
+        P2[Check-in agent]
+        P3[Gate manager]
+        P4[Coordinator]
+        P5[Flight planner]
+        P6[Admin]
+    end
+
+    subgraph PAGES["Pages"]
+        Home["/"]
+        Search["/search/results"]
+        Booking["/booking/*"]
+        Checkin["/checkin"]
+        Gate["/gate"]
+        Coord["/coordinator"]
+        Planner["/planner"]
+        SubTools["/planner/*"]
+        Admin["/admin/*"]
+    end
+
+    subgraph APIS["Bridge APIs"]
+        FlightsAPI["/api/flights"]
+        BookAPI["/api/bookings"]
+        AgentsAPI["/api/agents"]
+        PhaseAPI["/api/planner/[phase]"]
+        ToolsAPI["/api/planner/{divert,cascade,...}"]
+        AdminAPI["/api/admin/*"]
+    end
+
+    subgraph BACK["Backend (Lambda or in-process)"]
+        FlightsBE[flights Lambda]
+        BookBE[bookings Lambda]
+        Agents[Search/Recommendation/<br/>Support/Disruption agents]
+        PlanAgents[5 Planning Agents<br/>via Orchestrator]
+        Engines[Deterministic engines<br/>perf / etops / pbn / mel / ...]
+        AdminBE[admin / integrations / dispatchers / planning Lambdas]
+    end
+
+    P1 --> Home
+    P1 --> Search
+    P1 --> Booking
+    P2 --> Checkin
+    P3 --> Gate
+    P4 --> Coord
+    P5 --> Planner
+    P5 --> SubTools
+    P6 --> Admin
+
+    Home --> AgentsAPI
+    Search --> FlightsAPI
+    Booking --> BookAPI
+    Booking --> AgentsAPI
+    Checkin --> AdminAPI
+    Gate --> AdminAPI
+    Coord --> AdminAPI
+    Planner --> PhaseAPI
+    SubTools --> ToolsAPI
+    Admin --> AdminAPI
+
+    AgentsAPI --> Agents
+    FlightsAPI --> FlightsBE
+    BookAPI --> BookBE
+    PhaseAPI --> PlanAgents
+    PhaseAPI --> Engines
+    ToolsAPI --> Engines
+    AdminAPI --> AdminBE
+```
+
+### 6.5 Multi-agent + RAG flow (the planner clicks "Brief")
+
+The end-to-end of one phase invocation. Engines compute facts deterministically; the agent
+re-phrases with retrieval context; the rejection feedback loop self-improves over time.
+
+```mermaid
+sequenceDiagram
+    participant U as Flight Planner
+    participant UI as /planner
+    participant API as /api/planner/brief
+    participant Eng as Deterministic Engines
+    participant Orch as PlannerOrchestrator
+    participant BA as BriefAgent
+    participant RAG as RAG Retrieval
+    participant Vec as Vector Store
+    participant Emb as Embeddings
+    participant LLM as Claude Sonnet
+    participant DB as Aurora<br/>+ pgvector
+
+    U->>UI: pick BA1000, click Brief
+    UI->>API: POST {flight}
+    API->>Eng: fetch METAR/TAF/SIGMET/NOTAM
+    Eng-->>API: facts (numbers only, no narrative)
+    API->>API: extract tenantId from JWT
+    API->>API: backfill rejection comments → Vec (idempotent)
+    API->>Orch: runAgent(phase=brief, facts, ctx)
+    Orch->>BA: BriefAgent.run(facts, ctx)
+    BA->>RAG: retrieveContext(tenantId, query, kinds)
+    RAG->>Emb: embed(query)
+    Emb-->>RAG: vector
+    RAG->>Vec: search(tenantId, vector, kinds, phase)
+    Vec->>DB: cosine similarity SELECT (RLS scoped)
+    DB-->>Vec: top-N matches
+    Vec-->>RAG: results
+    RAG->>RAG: recency re-rank (30-day half-life)
+    RAG->>RAG: format named blocks, truncate 500ch
+    RAG-->>BA: systemSuffix + audit list
+    BA->>LLM: messages.create(system + suffix, user=facts)
+    LLM-->>BA: 120-word brief prose
+    BA->>DB: write vector_retrievals row (audit)
+    BA-->>Orch: {text, retrievalSource, retrievedDocIds}
+    Orch-->>API: AgentResult
+    API-->>UI: {summary, data, source}
+    UI-->>U: rendered briefing
+
+    rect rgb(255, 245, 225)
+    Note over U,DB: Feedback loop:<br/>If planner rejects with comment,<br/>comment auto-embeds → next plan retrieves it
+    end
+```
+
+### 6.6 GAAS reuse map (answers "is GAAS reused?")
+
+The GAAS substrate (RAG / memory / vector store / embeddings) is **reusable** by every agent
+on the platform, but is **currently consumed only by the 5 planning agents**. The 4 customer-
+facing agents extend the older `BaseAgent` directly without RAG. Migrating them is mechanical
+once the retrieval set per agent is decided.
+
+```mermaid
+flowchart TB
+    subgraph SUB["GAAS substrate — reusable across all agents"]
+        direction LR
+        RAG[lib/ai/rag.ts]
+        MEM[lib/ai/memory.ts]
+        VS[lib/ai/vector-store.ts]
+        EMB[lib/ai/embeddings.ts]
+    end
+
+    subgraph BASE["BaseAgent (core/agents/base.ts)"]
+        direction TB
+        BASESYS["Anthropic SDK + tenant brand<br/>+ tone + policies + passenger profile"]
+    end
+
+    subgraph PB["PlanningBaseAgent (extends BaseAgent)"]
+        direction TB
+        PBA["Adds: phase + retrievalKinds<br/>+ RAG retrieval + audit metadata"]
+    end
+
+    subgraph WIRED["✅ Currently consume GAAS substrate"]
+        direction LR
+        BriefA[BriefAgent]
+        RouteA[RouteAgent]
+        FuelA[FuelAgent]
+        AcftA[AircraftAgent]
+        RelA[ReleaseAgent]
+    end
+
+    subgraph NOTYET["⏳ Could plug in but don't yet"]
+        direction LR
+        SrcA[SearchAgent]
+        RecA[RecommendationAgent]
+        SupA[SupportAgent]
+        DisA[DisruptionAgent]
+    end
+
+    BASE --> PB
+    PB --> WIRED
+    WIRED --> SUB
+
+    BASE --> NOTYET
+    NOTYET -.->|future: extend PlanningBaseAgent<br/>and define retrievalKinds| SUB
+```
+
+The mechanics for migrating any of the 4 customer-facing agents:
+
+1. Change `extends BaseAgent` → `extends PlanningBaseAgent`
+2. Declare `readonly phase = 'support'` (or appropriate)
+3. Declare `readonly retrievalKinds = ['policy', 'faq', 'memory']` (custom kinds)
+4. Pass `tenantId` in context when calling
+5. Done — RAG context flows automatically
+
+Use cases that would benefit:
+- **SupportAgent** — pull tenant's cancellation/baggage/refund policies as `kind='policy'` instead of stuffing them into every system prompt
+- **DisruptionAgent** — retrieve past `kind='irops_playbook'` resolutions so the agent learns operator-specific re-accommodation patterns
+- **RecommendationAgent** — pull `kind='upsell_pattern'` from approved past upsells per tenant
+
+### 6.7 RAG pipeline detail
+
+The exact transformation from facts to a retrieval-augmented prompt.
+
+```mermaid
+flowchart LR
+    F["facts (deterministic)<br/>{flight, origin, dest,<br/>metars, sigmets, notams}"]
+    Q["queryFromFacts()<br/>'BA1000 KJFK→EGLL,<br/>3 SIGMETs, 6 NOTAMs'"]
+    EMB["Embed query<br/>(mock / voyage / openai)"]
+    SEARCH["VectorStore.search<br/>+ tenant_id filter<br/>+ kind filter<br/>+ phase filter<br/>+ minScore"]
+    TOPN["Top 2N raw matches"]
+    RERANK["Recency re-rank<br/>0.6 + 0.4 × 0.5^(ageDays/30)"]
+    GROUP["Group by kind:<br/>REJECTIONS<br/>OPSPEC<br/>SOPs<br/>REGULATIONS<br/>MEMORY<br/>INCIDENTS"]
+    TRUNC["Truncate each<br/>to 500 chars<br/>(anti-injection)"]
+    SUFFIX["systemSuffix<br/>(quoted reference,<br/>NOT instructions)"]
+    PROMPT["system + suffix +<br/>user=JSON.stringify(facts)"]
+    LLM["Anthropic.messages.create"]
+    OUT["text + retrievalSource +<br/>retrievedDocIds"]
+    AUDIT["INSERT INTO vector_retrievals<br/>(tenant, flight, phase,<br/>query, retrieved, agent)"]
+
+    F --> Q --> EMB --> SEARCH --> TOPN --> RERANK --> GROUP --> TRUNC --> SUFFIX --> PROMPT --> LLM --> OUT
+    OUT --> AUDIT
+```
+
+### 6.8 Tenant onboarding sequence
+
+The lifecycle from "Aerospica wants in" to "they're dispatching flights" — the SaaS path.
+
+```mermaid
+sequenceDiagram
+    participant Ops as Platform Ops
+    participant DB as Aurora
+    participant TA as Tenant Admin<br/>(Aerospica)
+    participant UI as /admin
+    participant FP as Flight Planner<br/>(Aerospica)
+    participant Planner as /planner
+
+    Ops->>DB: INSERT INTO tenants (slug='aerospica', ...)
+    Note over DB: Migration 010 + 011 + 012<br/>auto-seed defaults
+    Ops->>DB: INSERT users (role='admin', tenant_id=...)
+    TA->>UI: sign in → JWT carries tenantSlug
+    TA->>UI: /admin/ops-specs → fill 7 blocks
+    Note over TA,UI: fuel policy, alt minima C055,<br/>ETOPS B044, PBN, CI, auth airports
+    TA->>UI: /admin/integrations → wire fuel + MEL + crew
+    Note over TA,UI: api_fms / api_amos / api_sabre<br/>or csv:// or s3://
+    TA->>UI: /admin/dispatchers → cert + currency
+    TA->>UI: /admin/ai/memory → seed initial facts
+    Note over TA,UI: tankering threshold, tail quirks,<br/>operational knowledge
+    Ops->>DB: INSERT users (role='flight_planner')
+    FP->>Planner: sign in → JWT
+    FP->>Planner: pick BA1000, run brief phase
+    Note over FP,Planner: BriefAgent runs with<br/>tenant memory + RAG context
+    Planner-->>FP: rendered brief, source includes<br/>"agent:BriefAgent + N memorys retrieved"
+```
+
+---
+
+## 7. Onboarding a new airline (end-to-end walkthrough)
 
 The full lifecycle from "Aerospica Airlines wants in" to "they're dispatching flights".
 
@@ -733,7 +1161,7 @@ All keyed by `tenant_id`, all isolated by RLS.
 
 ---
 
-## 7. Dispatch core — what the engines compute
+## 8. Dispatch core — what the engines compute
 
 ### 6.1 Phase 1: Brief
 
@@ -804,7 +1232,7 @@ W&B (mocked), Crew (real adapters), Slot/ATC (mocked), Release (joint operationa
 
 ---
 
-## 8. GAAS AI layer — what the agents do
+## 9. GAAS AI layer — what the agents do
 
 ### 7.1 The five agents
 
@@ -903,7 +1331,7 @@ output. That's the point of GAAS-for-aviation: explainable AI in a regulated con
 
 ---
 
-## 9. Installation
+## 10. Installation
 
 ### 8.1 Local dev (zero infra)
 
@@ -954,7 +1382,7 @@ Required Vercel env:
 
 ---
 
-## 10. Configuration reference (every per-tenant knob)
+## 11. Configuration reference (every per-tenant knob)
 
 ### 9.1 OpsSpecs (`/admin/ops-specs`)
 
@@ -1005,7 +1433,7 @@ write time. Retrieved automatically during the matching phase.
 
 ---
 
-## 11. Testing
+## 12. Testing
 
 ### 10.1 Test the GAAS layer
 
@@ -1056,7 +1484,7 @@ write time. Retrieved automatically during the matching phase.
 
 ---
 
-## 12. Pending items / roadmap
+## 13. Pending items / roadmap
 
 ### 11.1 GAAS layer
 
@@ -1103,7 +1531,7 @@ write time. Retrieved automatically during the matching phase.
 
 ---
 
-## 13. Glossary
+## 14. Glossary
 
 | Term | Meaning |
 |---|---|
@@ -1143,7 +1571,7 @@ write time. Retrieved automatically during the matching phase.
 
 ---
 
-## 14. Appendix — file map
+## 15. Appendix — file map
 
 ```
 shared/
