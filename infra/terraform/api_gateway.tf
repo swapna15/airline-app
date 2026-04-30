@@ -63,6 +63,7 @@ resource "aws_iam_role_policy" "apigw_invoke_lambda" {
         aws_lambda_function.admin.arn,
         aws_lambda_function.planning.arn,
         aws_lambda_function.integrations.arn,
+        aws_lambda_function.dispatchers.arn,
       ]
     }]
   })
@@ -258,6 +259,37 @@ resource "aws_api_gateway_resource" "admin_flights" {
   path_part   = "flights"
 }
 
+# /admin/dispatchers — dispatcher certificates + currency
+resource "aws_api_gateway_resource" "admin_dispatchers" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.admin.id
+  path_part   = "dispatchers"
+}
+
+resource "aws_api_gateway_resource" "admin_dispatchers_userId" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.admin_dispatchers.id
+  path_part   = "{userId}"
+}
+
+resource "aws_api_gateway_resource" "admin_dispatchers_userId_areas" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.admin_dispatchers_userId.id
+  path_part   = "areas"
+}
+
+resource "aws_api_gateway_resource" "admin_dispatchers_userId_types" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.admin_dispatchers_userId.id
+  path_part   = "types"
+}
+
+resource "aws_api_gateway_resource" "admin_dispatchers_userId_currency" {
+  rest_api_id = aws_api_gateway_rest_api.main.id
+  parent_id   = aws_api_gateway_resource.admin_dispatchers_userId.id
+  path_part   = "currency"
+}
+
 # /admin/integrations — per-tenant integration configs (DB-backed in phase 5)
 resource "aws_api_gateway_resource" "admin_integrations" {
   rest_api_id = aws_api_gateway_rest_api.main.id
@@ -358,6 +390,14 @@ locals {
     "PATCH-admin-users-id-role"    = { method = "PATCH",  resource_id = aws_api_gateway_resource.admin_users_id_role.id,          lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
     "DELETE-admin-users-id"        = { method = "DELETE", resource_id = aws_api_gateway_resource.admin_users_id.id,               lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
     "GET-admin-flights"            = { method = "GET",    resource_id = aws_api_gateway_resource.admin_flights.id,                lambda_arn = aws_lambda_function.admin.invoke_arn,    auth = true  },
+
+    # Admin dispatchers — admin only (enforced by handler)
+    "GET-admin-dispatchers"               = { method = "GET", resource_id = aws_api_gateway_resource.admin_dispatchers.id,                  lambda_arn = aws_lambda_function.dispatchers.invoke_arn, auth = true },
+    "GET-admin-dispatchers-userId"        = { method = "GET", resource_id = aws_api_gateway_resource.admin_dispatchers_userId.id,           lambda_arn = aws_lambda_function.dispatchers.invoke_arn, auth = true },
+    "PUT-admin-dispatchers-userId"        = { method = "PUT", resource_id = aws_api_gateway_resource.admin_dispatchers_userId.id,           lambda_arn = aws_lambda_function.dispatchers.invoke_arn, auth = true },
+    "PUT-admin-dispatchers-userId-areas"  = { method = "PUT", resource_id = aws_api_gateway_resource.admin_dispatchers_userId_areas.id,     lambda_arn = aws_lambda_function.dispatchers.invoke_arn, auth = true },
+    "PUT-admin-dispatchers-userId-types"  = { method = "PUT", resource_id = aws_api_gateway_resource.admin_dispatchers_userId_types.id,     lambda_arn = aws_lambda_function.dispatchers.invoke_arn, auth = true },
+    "PUT-admin-dispatchers-userId-currency" = { method = "PUT", resource_id = aws_api_gateway_resource.admin_dispatchers_userId_currency.id, lambda_arn = aws_lambda_function.dispatchers.invoke_arn, auth = true },
 
     # Admin integrations — admin only (enforced by handler)
     "GET-admin-integrations"           = { method = "GET",    resource_id = aws_api_gateway_resource.admin_integrations.id,           lambda_arn = aws_lambda_function.integrations.invoke_arn, auth = true  },
@@ -496,6 +536,7 @@ locals {
     admin        = aws_lambda_function.admin.function_name
     planning     = aws_lambda_function.planning.function_name
     integrations = aws_lambda_function.integrations.function_name
+    dispatchers  = aws_lambda_function.dispatchers.function_name
     authorizer   = aws_lambda_function.authorizer.function_name
   }
 }

@@ -136,6 +136,12 @@ data "archive_file" "integrations" {
   output_path = "/tmp/integrations.zip"
 }
 
+data "archive_file" "dispatchers" {
+  type        = "zip"
+  source_dir  = "${var.lambda_dist_path}/dispatchers_pkg"
+  output_path = "/tmp/dispatchers.zip"
+}
+
 # ── Lambda: Authorizer (no VPC — only verifies JWT, no DB) ────────────────────
 resource "aws_lambda_function" "authorizer" {
   function_name    = "${local.name}-authorizer"
@@ -320,6 +326,27 @@ resource "aws_lambda_function" "integrations" {
   }
 
   tags = { Name = "${local.name}-integrations" }
+}
+
+# ── Lambda: Dispatchers (admin: dispatcher cert + currency CRUD) ─────────────
+resource "aws_lambda_function" "dispatchers" {
+  function_name    = "${local.name}-dispatchers"
+  role             = aws_iam_role.lambda.arn
+  runtime          = local.lambda_runtime
+  handler          = "dispatchers/handler.handler"
+  filename         = data.archive_file.dispatchers.output_path
+  source_code_hash = data.archive_file.dispatchers.output_base64sha256
+  timeout          = local.lambda_timeout
+  memory_size      = local.lambda_memory
+
+  environment { variables = local.lambda_env }
+
+  vpc_config {
+    subnet_ids         = local.lambda_vpc_config.subnet_ids
+    security_group_ids = local.lambda_vpc_config.security_group_ids
+  }
+
+  tags = { Name = "${local.name}-dispatchers" }
 }
 
 # ── Lambda: Migrate (one-shot DB migration, invoked by CI after terraform apply) ─

@@ -128,6 +128,47 @@ async function upsertPlan(
     return { statusCode: 409, headers: {}, body: JSON.stringify({ error: 'plan is released and immutable' }) };
   }
 
+  // Release-time dispatcher-certification guard. Closes
+  // .claude/specs/flight_planning_design.md §5.4: a release is refused if
+  // the dispatcher's certificate is missing/expired/revoked or any
+  // §121.463(c) currency record has lapsed. Releases for status≠'released'
+  // (regular phase saves, approvals) are unaffected — the check only
+  // gates the actual immutable-release transition.
+  if (data.status === 'released') {
+    const cert = await queryOne<{
+      id: string; status: string; expires_at: string | null;
+    }>(
+      `SELECT id, status, expires_at FROM dispatcher_certificates WHERE user_id = $1`,
+      [reviewerId],
+    );
+    if (!cert) {
+      return { statusCode: 403, headers: {}, body: JSON.stringify({
+        error: 'release blocked: no dispatcher certificate on file for this user. Add one in /admin/dispatchers.',
+      })};
+    }
+    if (cert.status !== 'active') {
+      return { statusCode: 403, headers: {}, body: JSON.stringify({
+        error: `release blocked: certificate status is "${cert.status}" — must be "active".`,
+      })};
+    }
+    if (cert.expires_at && new Date(cert.expires_at).getTime() < Date.now()) {
+      return { statusCode: 403, headers: {}, body: JSON.stringify({
+        error: `release blocked: certificate expired ${cert.expires_at}.`,
+      })};
+    }
+    const expiredCurrency = await query<{ group_code: string; expires_at: string }>(
+      `SELECT group_code, expires_at FROM dispatcher_currency
+       WHERE certificate_id = $1 AND expires_at < CURRENT_DATE`,
+      [cert.id],
+    );
+    if (expiredCurrency.length > 0) {
+      return { statusCode: 403, headers: {}, body: JSON.stringify({
+        error: `release blocked: §121.463(c) currency expired for ${expiredCurrency.map((c) => c.group_code).join(', ')}.`,
+        expiredCurrency,
+      })};
+    }
+  }
+
   // Build a JSONB merge for each phase column. Only columns present in the
   // incoming `phases` object are touched.
   const phaseSets: string[] = [];
