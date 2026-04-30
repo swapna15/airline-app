@@ -2,8 +2,9 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { useSession } from 'next-auth/react';
-import { Check, AlertTriangle, Loader2, Sparkles, FileSignature, Clock, Lock } from 'lucide-react';
+import { Check, AlertTriangle, Loader2, Sparkles, FileSignature, Clock, Lock, Zap } from 'lucide-react';
 import { PlannerTabs } from '@/components/PlannerTabs';
+import { AutoPrepareProgress, usePollRun, type AutoPrepareRun } from '@/components/AutoPrepareProgress';
 
 type PhaseId =
   | 'brief'
@@ -81,6 +82,9 @@ export default function PlannerPage() {
   const [activeRejectPhase, setActiveRejectPhase] = useState<PhaseId | null>(null);
   const [rejectComment, setRejectComment] = useState('');
   const [loading, setLoading] = useState(false);
+  const [autoRunId, setAutoRunId] = useState<string | null>(null);
+  const [autoRun, setAutoRun] = useState<AutoPrepareRun | null>(null);
+  const [autoBusy, setAutoBusy] = useState(false);
 
   const selected = MOCK_FLIGHTS.find((f) => f.id === selectedId)!;
   const phases = plan?.phases;
@@ -90,6 +94,9 @@ export default function PlannerPage() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    setAutoRunId(null);
+    setAutoRun(null);
+    setAutoBusy(false);
     fetch(`/api/planner/plans/${selectedId}`)
       .then((r) => r.json())
       .then((p: FlightPlan) => { if (!cancelled) setPlan(p); })
@@ -108,6 +115,69 @@ export default function PlannerPage() {
     });
     if (res.ok) setPlan(await res.json());
   }, [plan, selectedId]);
+
+  const persistManyPhases = useCallback(async (updates: Partial<PhasesMap>) => {
+    if (!plan) return;
+    const merged: PhasesMap = { ...plan.phases };
+    for (const k of Object.keys(updates) as PhaseId[]) {
+      const u = updates[k];
+      if (u) merged[k] = u;
+    }
+    const updated: FlightPlan = { ...plan, phases: merged };
+    setPlan(updated);
+    const res = await fetch(`/api/planner/plans/${selectedId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ phases: updates }),
+    });
+    if (res.ok) setPlan(await res.json());
+  }, [plan, selectedId]);
+
+  // Auto-prepare polling: fold completed phases into the plan as `ready` so
+  // the planner can approve/reject them through the existing per-phase UI.
+  const handleAutoUpdate = useCallback((run: AutoPrepareRun) => {
+    setAutoRun(run);
+    if (!plan || released) return;
+    const updates: Partial<PhasesMap> = {};
+    const runPhaseIds = Object.keys(run.phases) as (keyof typeof run.phases)[];
+    for (const id of runPhaseIds) {
+      const rp = run.phases[id];
+      const cur = plan.phases[id as PhaseId];
+      if (rp.status === 'ready' && cur.status !== 'approved' && cur.summary !== rp.summary) {
+        updates[id as PhaseId] = {
+          status: 'ready',
+          summary: rp.summary,
+          source: rp.source,
+          data: rp.data,
+        };
+      }
+      if (rp.status === 'failed' && cur.status === 'pending') {
+        updates[id as PhaseId] = { status: 'rejected', comment: rp.error ?? 'auto-prepare failed' };
+      }
+    }
+    if (Object.keys(updates).length > 0) {
+      void persistManyPhases(updates);
+    }
+    if (run.status !== 'running') setAutoBusy(false);
+  }, [plan, released, persistManyPhases]);
+
+  usePollRun(autoRunId, handleAutoUpdate);
+
+  const startAutoPrepare = async () => {
+    if (!plan || released || autoBusy) return;
+    setAutoBusy(true);
+    try {
+      const res = await fetch('/api/planner/auto-prepare', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flight: selected }),
+      });
+      const json = (await res.json()) as { runs: { runId: string }[] };
+      setAutoRunId(json.runs?.[0]?.runId ?? null);
+    } catch {
+      setAutoBusy(false);
+    }
+  };
 
   const recordReview = useCallback(
     (phase: PhaseId, action: 'approve' | 'reject' | 'release', comment?: string) =>
@@ -214,15 +284,28 @@ export default function PlannerPage() {
               <FileSignature size={13} /> Released
             </span>
           ) : (
-            <button
-              onClick={releaseDispatch}
-              disabled={!allApproved || loading}
-              className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium disabled:bg-gray-200 disabled:text-gray-400 hover:bg-amber-700 transition-colors"
-            >
-              Release Dispatch
-            </button>
+            <div className="flex gap-2">
+              <button
+                onClick={startAutoPrepare}
+                disabled={autoBusy || loading}
+                className="px-4 py-2 rounded-lg bg-indigo-600 text-white text-sm font-medium disabled:bg-gray-200 disabled:text-gray-400 hover:bg-indigo-700 transition-colors flex items-center gap-1.5"
+                title="Run brief / route / aircraft / fuel / W&B / crew / slot in parallel and present for review"
+              >
+                {autoBusy ? <Loader2 size={13} className="animate-spin" /> : <Zap size={13} />}
+                Auto-prepare
+              </button>
+              <button
+                onClick={releaseDispatch}
+                disabled={!allApproved || loading}
+                className="px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium disabled:bg-gray-200 disabled:text-gray-400 hover:bg-amber-700 transition-colors"
+              >
+                Release Dispatch
+              </button>
+            </div>
           )}
         </header>
+
+        {autoRun && <AutoPrepareProgress run={autoRun} />}
 
         {loading || !phases ? (
           <div className="flex items-center gap-2 text-sm text-gray-500 py-8">
