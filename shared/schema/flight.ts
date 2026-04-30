@@ -35,7 +35,7 @@ const Iso8601WithTz = z.string().refine(
   'must be a parseable ISO 8601 timestamp',
 );
 
-const FlightSourceSchema = z.enum(['own', 'duffel', 'csv', 'fms_api']);
+export const FlightSourceSchema = z.enum(['own', 'duffel', 'csv', 'fms_api']);
 export type FlightSource = z.infer<typeof FlightSourceSchema>;
 
 // Common to every source — the minimum needed to identify a flight.
@@ -54,6 +54,10 @@ const FlightCoreSchema = z.object({
   /** ICAO aircraft type code, e.g. 'B77W', 'A333' — optional because
    *  retail/Duffel results sometimes only carry IATA equipment. */
   aircraftIcao: z.string().min(2).max(4).optional(),
+  /** Human-readable type, e.g. 'Boeing 777-300ER'. Same plane as
+   *  aircraftIcao but spelled out — used by lib/perf.ts substring matching
+   *  and for UI display where an ICAO code isn't recognizable. */
+  aircraftType: z.string().optional(),
 });
 
 // Operational extension — only meaningful for source: 'own'.

@@ -6,25 +6,24 @@ import { Zap, Loader2, Clock, ArrowRight } from 'lucide-react';
 import { PlannerTabs } from '@/components/PlannerTabs';
 import { AutoPrepareProgress, type AutoPrepareRun } from '@/components/AutoPrepareProgress';
 import { readNdjson } from '@/lib/ndjson';
+import type { OwnFlight } from '@shared/schema/flight';
+import {
+  displayFlightNo,
+  displayDepartureTime,
+  todayAt,
+  toFlightInput,
+  minutesUntilDeparture,
+} from '@/lib/flight-display';
 
-interface FlightRow {
-  id: string;
-  flight: string;
-  origin: string;
-  destination: string;
-  scheduled: string;
-  aircraft: string;
-  paxLoad: number;
-}
-
-// Mock day's rotation. Replace with /api/planner/eod or fleet feed.
-const TODAY: FlightRow[] = [
-  { id: '1', flight: 'BA1000', origin: 'JFK', destination: 'LHR', scheduled: '09:45', aircraft: 'Boeing 777-300ER', paxLoad: 287 },
-  { id: '2', flight: 'AA2111', origin: 'JFK', destination: 'CDG', scheduled: '11:15', aircraft: 'Airbus A330-300', paxLoad: 244 },
-  { id: '3', flight: 'LH4410', origin: 'JFK', destination: 'FRA', scheduled: '14:00', aircraft: 'Airbus A380-800', paxLoad: 489 },
-  { id: '4', flight: 'EK5500', origin: 'JFK', destination: 'DXB', scheduled: '16:30', aircraft: 'Airbus A380-800', paxLoad: 502 },
-  { id: '5', flight: 'AF7700', origin: 'BOS', destination: 'CDG', scheduled: '19:50', aircraft: 'Airbus A350-900', paxLoad: 312 },
-  { id: '6', flight: 'KL6612', origin: 'BOS', destination: 'AMS', scheduled: '21:10', aircraft: 'Boeing 787-9', paxLoad: 296 },
+// Mock day's rotation, conformant to the canonical OwnFlight schema.
+// Replace with /api/planner/eod or a fleet feed when ready.
+const TODAY: OwnFlight[] = [
+  { source: 'own', externalId: '1', carrier: 'BA', flightNumber: '1000', origin: 'JFK', destination: 'LHR', scheduledDeparture: todayAt('09:45'), scheduledArrival: todayAt('21:45'), aircraftIcao: 'B77W', aircraftType: 'Boeing 777-300ER', paxLoad: 287 },
+  { source: 'own', externalId: '2', carrier: 'AA', flightNumber: '2111', origin: 'JFK', destination: 'CDG', scheduledDeparture: todayAt('11:15'), scheduledArrival: todayAt('23:30'), aircraftIcao: 'A333', aircraftType: 'Airbus A330-300',  paxLoad: 244 },
+  { source: 'own', externalId: '3', carrier: 'LH', flightNumber: '4410', origin: 'JFK', destination: 'FRA', scheduledDeparture: todayAt('14:00'), scheduledArrival: todayAt('02:30'), aircraftIcao: 'A388', aircraftType: 'Airbus A380-800',  paxLoad: 489 },
+  { source: 'own', externalId: '4', carrier: 'EK', flightNumber: '5500', origin: 'JFK', destination: 'DXB', scheduledDeparture: todayAt('16:30'), scheduledArrival: todayAt('07:30'), aircraftIcao: 'A388', aircraftType: 'Airbus A380-800',  paxLoad: 502 },
+  { source: 'own', externalId: '5', carrier: 'AF', flightNumber: '7700', origin: 'BOS', destination: 'CDG', scheduledDeparture: todayAt('19:50'), scheduledArrival: todayAt('07:50'), aircraftIcao: 'A359', aircraftType: 'Airbus A350-900',  paxLoad: 312 },
+  { source: 'own', externalId: '6', carrier: 'KL', flightNumber: '6612', origin: 'BOS', destination: 'AMS', scheduledDeparture: todayAt('21:10'), scheduledArrival: todayAt('09:10'), aircraftIcao: 'B789', aircraftType: 'Boeing 787-9',     paxLoad: 296 },
 ];
 
 type Window = 'next2h' | 'next4h' | 'today';
@@ -35,16 +34,8 @@ const WINDOWS: { id: Window; label: string; minutes: number | null }[] = [
   { id: 'today',  label: 'All today', minutes: null },
 ];
 
-function minutesUntil(hhmm: string): number {
-  const [h, m] = hhmm.split(':').map(Number);
-  const now = new Date();
-  const target = new Date();
-  target.setHours(h, m, 0, 0);
-  return Math.round((target.getTime() - now.getTime()) / 60000);
-}
-
-function FlightProgressRow({ flight, run }: { flight: FlightRow; run: AutoPrepareRun | null }) {
-  const eta = minutesUntil(flight.scheduled);
+function FlightProgressRow({ flight, run }: { flight: OwnFlight; run: AutoPrepareRun | null }) {
+  const eta = minutesUntilDeparture(flight);
   const etaLabel = eta < 0 ? `${-eta}m ago` : `T-${eta}m`;
 
   return (
@@ -52,13 +43,13 @@ function FlightProgressRow({ flight, run }: { flight: FlightRow; run: AutoPrepar
       <div className="flex items-center justify-between mb-3">
         <div>
           <div className="flex items-center gap-2">
-            <span className="font-semibold text-sm">{flight.flight}</span>
+            <span className="font-semibold text-sm">{displayFlightNo(flight)}</span>
             <span className="text-xs text-gray-500 flex items-center gap-1">
-              <Clock size={11} /> {flight.scheduled} · {etaLabel}
+              <Clock size={11} /> {displayDepartureTime(flight.scheduledDeparture)} · {etaLabel}
             </span>
           </div>
           <p className="text-xs text-gray-500 mt-0.5">
-            {flight.origin} → {flight.destination} · {flight.aircraft} · {flight.paxLoad} pax
+            {flight.origin} → {flight.destination} · {flight.aircraftType ?? flight.aircraftIcao} · {flight.paxLoad} pax
           </p>
         </div>
         <Link
@@ -79,17 +70,17 @@ export default function PlannerBatchPage() {
   const [windowSel, setWindowSel] = useState<Window>('next4h');
   const [runsByFlight, setRunsByFlight] = useState<Record<string, AutoPrepareRun>>({});
   const [busy, setBusy] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set(TODAY.map((f) => f.id)));
+  const [selected, setSelected] = useState<Set<string>>(new Set(TODAY.map((f) => f.externalId)));
 
   const filtered = useMemo(() => {
     const win = WINDOWS.find((w) => w.id === windowSel)!;
     return TODAY
       .filter((f) => {
         if (win.minutes === null) return true;
-        const m = minutesUntil(f.scheduled);
+        const m = minutesUntilDeparture(f);
         return m >= -30 && m <= win.minutes; // include flights up to 30 min in the past
       })
-      .sort((a, b) => a.scheduled.localeCompare(b.scheduled));
+      .sort((a, b) => a.scheduledDeparture.localeCompare(b.scheduledDeparture));
   }, [windowSel]);
 
   const toggle = (id: string) => {
@@ -100,14 +91,14 @@ export default function PlannerBatchPage() {
   };
 
   const startBatch = async () => {
-    const flights = filtered.filter((f) => selected.has(f.id));
+    const flights = filtered.filter((f) => selected.has(f.externalId));
     if (flights.length === 0) return;
     setBusy(true);
     try {
       const res = await fetch('/api/planner/auto-prepare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ flights }),
+        body: JSON.stringify({ flights: flights.map(toFlightInput) }),
       });
       if (!res.ok) return;
 
@@ -117,13 +108,17 @@ export default function PlannerBatchPage() {
         | { type: 'error'; error: string };
 
       // Each NDJSON line carries one flight's current run snapshot. We
-      // dispatch by (flight, scheduled) → row id so the right row's progress
-      // strip updates as that flight's phases finish.
+      // dispatch back to the right row by matching on the FlightInput shape
+      // we sent (carrier+number string and HH:MM time).
       for await (const line of readNdjson<Line>(res)) {
         if (line.type !== 'update') continue;
-        const row = flights.find((f) => f.flight === line.flight && f.scheduled === line.scheduled);
+        const row = flights.find(
+          (f) =>
+            displayFlightNo(f) === line.flight &&
+            displayDepartureTime(f.scheduledDeparture) === line.scheduled,
+        );
         if (!row) continue;
-        setRunsByFlight((prev) => ({ ...prev, [row.id]: line.run }));
+        setRunsByFlight((prev) => ({ ...prev, [row.externalId]: line.run }));
       }
     } finally {
       setBusy(false);
@@ -176,16 +171,16 @@ export default function PlannerBatchPage() {
       ) : (
         <div className="space-y-4">
           {filtered.map((f) => (
-            <div key={f.id} className="flex items-start gap-3">
+            <div key={f.externalId} className="flex items-start gap-3">
               <input
                 type="checkbox"
-                checked={selected.has(f.id)}
-                onChange={() => toggle(f.id)}
+                checked={selected.has(f.externalId)}
+                onChange={() => toggle(f.externalId)}
                 className="mt-5 ml-2 accent-indigo-600"
-                aria-label={`select ${f.flight}`}
+                aria-label={`select ${displayFlightNo(f)}`}
               />
               <div className="flex-1 min-w-0">
-                <FlightProgressRow flight={f} run={runsByFlight[f.id] ?? null} />
+                <FlightProgressRow flight={f} run={runsByFlight[f.externalId] ?? null} />
               </div>
             </div>
           ))}

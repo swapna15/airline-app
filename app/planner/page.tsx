@@ -6,6 +6,8 @@ import { Check, AlertTriangle, Loader2, Sparkles, FileSignature, Clock, Lock, Za
 import { PlannerTabs } from '@/components/PlannerTabs';
 import { AutoPrepareProgress, type AutoPrepareRun } from '@/components/AutoPrepareProgress';
 import { readNdjson } from '@/lib/ndjson';
+import type { OwnFlight } from '@shared/schema/flight';
+import { displayFlightNo, displayDepartureTime, toFlightInput, todayAt } from '@/lib/flight-display';
 
 type PhaseId =
   | 'brief'
@@ -38,21 +40,14 @@ interface FlightPlan {
   releasedBy?: string;
 }
 
-interface FlightRow {
-  id: string;
-  flight: string;
-  origin: string;
-  destination: string;
-  scheduled: string;
-  aircraft: string;
-  paxLoad: number;
-}
-
-const MOCK_FLIGHTS: FlightRow[] = [
-  { id: '1', flight: 'BA1000', origin: 'JFK', destination: 'LHR', scheduled: '09:45', aircraft: 'Boeing 777-300ER', paxLoad: 287 },
-  { id: '2', flight: 'AA2111', origin: 'JFK', destination: 'CDG', scheduled: '11:15', aircraft: 'Airbus A330-300', paxLoad: 244 },
-  { id: '3', flight: 'LH4410', origin: 'JFK', destination: 'FRA', scheduled: '14:00', aircraft: 'Airbus A380-800', paxLoad: 489 },
-  { id: '4', flight: 'EK5500', origin: 'JFK', destination: 'DXB', scheduled: '16:30', aircraft: 'Airbus A380-800', paxLoad: 502 },
+// Mock data conforms to the canonical OwnFlight schema. When this is replaced
+// by a fetch from the deployed flights table, the type stays the same and
+// nothing downstream changes.
+const MOCK_FLIGHTS: OwnFlight[] = [
+  { source: 'own', externalId: '1', carrier: 'BA', flightNumber: '1000', origin: 'JFK', destination: 'LHR', scheduledDeparture: todayAt('09:45'), scheduledArrival: todayAt('21:45'), aircraftIcao: 'B77W', aircraftType: 'Boeing 777-300ER', tail: 'G-XLEK', paxLoad: 287 },
+  { source: 'own', externalId: '2', carrier: 'AA', flightNumber: '2111', origin: 'JFK', destination: 'CDG', scheduledDeparture: todayAt('11:15'), scheduledArrival: todayAt('23:30'), aircraftIcao: 'A333', aircraftType: 'Airbus A330-300',  paxLoad: 244 },
+  { source: 'own', externalId: '3', carrier: 'LH', flightNumber: '4410', origin: 'JFK', destination: 'FRA', scheduledDeparture: todayAt('14:00'), scheduledArrival: todayAt('02:30'), aircraftIcao: 'A388', aircraftType: 'Airbus A380-800',  paxLoad: 489 },
+  { source: 'own', externalId: '4', carrier: 'EK', flightNumber: '5500', origin: 'JFK', destination: 'DXB', scheduledDeparture: todayAt('16:30'), scheduledArrival: todayAt('07:30'), aircraftIcao: 'A388', aircraftType: 'Airbus A380-800',  paxLoad: 502 },
 ];
 
 const PHASES: { id: PhaseId; label: string; description: string }[] = [
@@ -78,7 +73,7 @@ export default function PlannerPage() {
   const { data: session } = useSession();
   const reviewerId = (session?.user as { email?: string })?.email ?? 'anonymous';
 
-  const [selectedId, setSelectedId] = useState<string>(MOCK_FLIGHTS[0].id);
+  const [selectedId, setSelectedId] = useState<string>(MOCK_FLIGHTS[0].externalId);
   const [plan, setPlan] = useState<FlightPlan | null>(null);
   const [activeRejectPhase, setActiveRejectPhase] = useState<PhaseId | null>(null);
   const [rejectComment, setRejectComment] = useState('');
@@ -87,7 +82,7 @@ export default function PlannerPage() {
   const [autoBusy, setAutoBusy] = useState(false);
   const [persistError, setPersistError] = useState<string | null>(null);
 
-  const selected = MOCK_FLIGHTS.find((f) => f.id === selectedId)!;
+  const selected = MOCK_FLIGHTS.find((f) => f.externalId === selectedId)!;
   const phases = plan?.phases;
   const released = plan?.status === 'released';
 
@@ -220,7 +215,7 @@ export default function PlannerPage() {
       const res = await fetch('/api/planner/auto-prepare', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ flight: selected }),
+        body: JSON.stringify({ flight: toFlightInput(selected) }),
       });
       if (!res.ok) return;
 
@@ -259,7 +254,7 @@ export default function PlannerPage() {
       const res = await fetch(`/api/planner/${id}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ flight: selected }),
+        body: JSON.stringify({ flight: toFlightInput(selected) }),
       });
       const data = await res.json();
       await persistPhase(id, { status: 'ready', summary: data.summary, source: data.source, data: data.data });
@@ -335,22 +330,22 @@ export default function PlannerPage() {
         <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Flights Needing Plan</h2>
         {MOCK_FLIGHTS.map((f) => (
           <button
-            key={f.id}
-            onClick={() => setSelectedId(f.id)}
+            key={f.externalId}
+            onClick={() => setSelectedId(f.externalId)}
             className={`w-full text-left p-4 rounded-xl border transition-colors ${
-              f.id === selectedId
+              f.externalId === selectedId
                 ? 'border-amber-300 bg-amber-50/40'
                 : 'border-gray-200 hover:bg-gray-50'
             }`}
           >
             <div className="flex items-center justify-between mb-1">
-              <span className="font-semibold text-sm">{f.flight}</span>
+              <span className="font-semibold text-sm">{displayFlightNo(f)}</span>
               <span className="text-xs text-gray-500 flex items-center gap-1">
-                <Clock size={11} /> {f.scheduled}
+                <Clock size={11} /> {displayDepartureTime(f.scheduledDeparture)}
               </span>
             </div>
             <p className="text-sm text-gray-600">{f.origin} → {f.destination}</p>
-            <p className="text-xs text-gray-400 mt-1">{f.aircraft} · {f.paxLoad} pax</p>
+            <p className="text-xs text-gray-400 mt-1">{f.aircraftType ?? f.aircraftIcao} · {f.paxLoad} pax</p>
           </button>
         ))}
       </aside>
@@ -359,9 +354,9 @@ export default function PlannerPage() {
       <section className="col-span-8 space-y-4">
         <header className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">{selected.flight}</h1>
+            <h1 className="text-2xl font-bold tracking-tight">{displayFlightNo(selected)}</h1>
             <p className="text-sm text-gray-500">
-              {selected.origin} → {selected.destination} · {selected.aircraft} · STD {selected.scheduled}
+              {selected.origin} → {selected.destination} · {selected.aircraftType ?? selected.aircraftIcao} · STD {displayDepartureTime(selected.scheduledDeparture)}
             </p>
           </div>
           {released ? (
