@@ -22,7 +22,20 @@ export const handler = async (
     if (!token) return deny(event.methodArn);
 
     const secret = process.env.NEXTAUTH_SECRET!;
-    const decoded = jwt.verify(token, secret) as NextAuthJWT;
+    let decoded: NextAuthJWT;
+    try {
+      decoded = jwt.verify(token, secret, { algorithms: ['HS256'] }) as NextAuthJWT;
+    } catch (verifyErr) {
+      // Log the exact error so it shows up in CloudWatch when JWT verification
+      // fails. Without this we just see a generic 401 in the API response.
+      console.error('JWT verify failed:', {
+        message: verifyErr instanceof Error ? verifyErr.message : String(verifyErr),
+        name:    verifyErr instanceof Error ? verifyErr.name    : undefined,
+        tokenPreview: token.slice(0, 40) + '...' + token.slice(-10),
+        secretLen: secret?.length ?? 0,
+      });
+      throw verifyErr;
+    }
 
     // Tenant slug is passed by the client as X-Tenant-ID.
     // We trust the slug value here — Lambda handlers resolve it to a UUID

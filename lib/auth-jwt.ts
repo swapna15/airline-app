@@ -31,7 +31,7 @@ export const jwtConfig = {
   }): Promise<string> {
     const exp = Math.floor(Date.now() / 1000) + (maxAge ?? DEFAULT_MAX_AGE);
     return new SignJWT({ ...(token ?? {}) })
-      .setProtectedHeader({ alg: 'HS256' })
+      .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
       .setIssuedAt()
       .setExpirationTime(exp)
       .sign(key(secret));
