@@ -20,12 +20,13 @@ interface StaffUser {
 }
 
 const MOCK_USERS: StaffUser[] = [
-  { id: '1', name: 'Admin User', email: 'admin@airline.com', role: 'admin', lastLogin: '2026-04-02', status: 'Active' },
-  { id: '2', name: 'coordinator', email: 'coordinator@airline.com', role: 'coordinator', lastLogin: '2026-04-02', status: 'Active' },
-  { id: '3', name: 'gate', email: 'gate@airline.com', role: 'gate_manager', lastLogin: '2026-04-01', status: 'Active' },
-  { id: '4', name: 'checkin', email: 'checkin@airline.com', role: 'checkin_agent', lastLogin: '2026-04-02', status: 'Active' },
-  { id: '5', name: 'Jane Doe', email: 'jane@example.com', role: 'passenger', lastLogin: '2026-03-30', status: 'Active' },
-  { id: '6', name: 'John Smith', email: 'john@example.com', role: 'passenger', lastLogin: '2026-03-28', status: 'Inactive' },
+  { id: '1', name: 'Admin User',     email: 'admin@airline.com',       role: 'admin',          lastLogin: '2026-04-02', status: 'Active' },
+  { id: '2', name: 'coordinator',    email: 'coordinator@airline.com', role: 'coordinator',    lastLogin: '2026-04-02', status: 'Active' },
+  { id: '3', name: 'gate',           email: 'gate@airline.com',        role: 'gate_manager',   lastLogin: '2026-04-01', status: 'Active' },
+  { id: '4', name: 'checkin',        email: 'checkin@airline.com',     role: 'checkin_agent',  lastLogin: '2026-04-02', status: 'Active' },
+  { id: '5', name: 'Flight Planner', email: 'planner@airline.com',     role: 'flight_planner', lastLogin: '2026-04-29', status: 'Active' },
+  { id: '6', name: 'Jane Doe',       email: 'jane@example.com',        role: 'passenger',      lastLogin: '2026-03-30', status: 'Active' },
+  { id: '7', name: 'John Smith',     email: 'john@example.com',        role: 'passenger',      lastLogin: '2026-03-28', status: 'Inactive' },
 ];
 
 const ROLE_BADGE: Record<UserRole, string> = {
@@ -44,7 +45,7 @@ const STATS = [
   { label: 'On-time Rate', value: '91%', icon: <TrendingUp size={18} />, color: 'text-orange-600', bg: 'bg-orange-50' },
 ];
 
-const ALL_ROLES: UserRole[] = ['passenger', 'checkin_agent', 'gate_manager', 'coordinator', 'admin'];
+const ALL_ROLES: UserRole[] = ['passenger', 'checkin_agent', 'gate_manager', 'coordinator', 'flight_planner', 'admin'];
 
 interface DuffelOrder {
   id: string;
@@ -534,6 +535,23 @@ export default function AdminPage() {
             Configure data sources and runtime settings for the dispatcher workflow.
           </p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <Link
+              href="/planner"
+              className="group flex items-start gap-3 p-4 rounded-xl border border-gray-200 hover:border-indigo-300 hover:bg-indigo-50/40 transition-colors"
+            >
+              <div className="w-10 h-10 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                <Plane size={18} />
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center justify-between">
+                  <p className="font-semibold text-sm text-gray-900">Open planner dashboard</p>
+                  <ArrowRight size={14} className="text-gray-400 group-hover:text-indigo-600 transition-colors" />
+                </div>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Per-flight 8-phase dispatch workflow with auto-prepare, divert, cascade, MEL, and EOD tools.
+                </p>
+              </div>
+            </Link>
             <Link
               href="/admin/integrations"
               className="group flex items-start gap-3 p-4 rounded-xl border border-gray-200 hover:border-amber-300 hover:bg-amber-50/40 transition-colors"
