@@ -1,5 +1,6 @@
 import { withAuth } from 'next-auth/middleware';
 import { NextResponse } from 'next/server';
+import { jwtConfig } from '@/lib/auth-jwt';
 import type { UserRole } from '@/types/roles';
 
 const ROUTE_ROLES: Record<string, UserRole[]> = {
@@ -23,6 +24,11 @@ export default withAuth(
     }
   },
   {
+    // Pass the same HS256 encode/decode used in auth.ts so withAuth's
+    // internal getToken() can read the cookie. Without this, withAuth
+    // falls back to the default JWE decoder, sees null, and redirects
+    // the user to /login on every protected route.
+    jwt: jwtConfig,
     callbacks: {
       authorized: ({ token }) => !!token,
     },
