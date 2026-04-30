@@ -26,8 +26,14 @@ ALTER TABLE users
 -- Seed default flight planner. Password = "password" — same bcrypt hash as
 -- every other 002_seed user. Update role on conflict so re-running this
 -- against an existing 'passenger' row promotes them.
-INSERT INTO users (name, email, password, role) VALUES
+--
+-- Migration 003_multi_tenant re-scoped the users uniqueness from `email` to
+-- `(tenant_id, email)`, so the ON CONFLICT target must include tenant_id.
+-- We pin the planner to the aeromock tenant (the same default applied to
+-- every other seeded user).
+INSERT INTO users (name, email, password, role, tenant_id) VALUES
   ('Flight Planner', 'planner@airline.com',
    '$2a$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi',
-   'flight_planner')
-ON CONFLICT (email) DO UPDATE SET role = EXCLUDED.role;
+   'flight_planner',
+   '00000000-0000-0000-0000-000000000001')
+ON CONFLICT (tenant_id, email) DO UPDATE SET role = EXCLUDED.role;
