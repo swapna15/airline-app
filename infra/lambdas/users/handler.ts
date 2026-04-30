@@ -70,7 +70,7 @@ async function updateRole(
   }
 
   const data = parseBody<{ role: string }>(body);
-  const allowed = ['passenger', 'checkin_agent', 'gate_manager', 'coordinator', 'admin'];
+  const allowed = ['passenger', 'checkin_agent', 'gate_manager', 'coordinator', 'flight_planner', 'admin'];
   if (!data?.role || !allowed.includes(data.role)) {
     return badRequest(`role must be one of: ${allowed.join(', ')}`);
   }
