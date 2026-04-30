@@ -394,10 +394,16 @@ resource "aws_api_gateway_integration" "routes" {
 resource "aws_api_gateway_deployment" "main" {
   rest_api_id = aws_api_gateway_rest_api.main.id
 
+  # IMPORTANT: include the authorizer in the trigger hash. Without it,
+  # changes to identity_source / authorizer_uri / TTL don't cause a fresh
+  # deployment and the stage keeps serving the old config — which silently
+  # 401s every authed request when identity_source requires headers the
+  # client doesn't send.
   triggers = {
     redeployment = sha1(jsonencode([
       aws_api_gateway_method.routes,
       aws_api_gateway_integration.routes,
+      aws_api_gateway_authorizer.jwt,
     ]))
   }
 
