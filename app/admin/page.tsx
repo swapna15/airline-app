@@ -153,12 +153,21 @@ export default function AdminPage() {
           <h1 className="text-2xl font-bold text-gray-900">Airline Admin</h1>
           <p className="text-sm text-gray-500 mt-1">Manage users, roles, and airline configuration</p>
         </div>
-        <a
-          href="/admin/integrations"
-          className="px-3 py-2 rounded-lg border border-gray-200 text-sm hover:bg-gray-50 flex items-center gap-2"
-        >
-          <Settings size={14} className="text-gray-500" /> Data integrations
-        </a>
+        <div className="flex items-center gap-2">
+          <a
+            href="/docs/gaas"
+            className="px-3 py-2 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-700 flex items-center gap-2 font-medium shadow-sm"
+            title="GAAS Reference — architecture, features, configuration, testing, roadmap"
+          >
+            <BookOpen size={14} /> GAAS Docs
+          </a>
+          <a
+            href="/admin/integrations"
+            className="px-3 py-2 rounded-lg border border-gray-200 text-sm hover:bg-gray-50 flex items-center gap-2"
+          >
+            <Settings size={14} className="text-gray-500" /> Data integrations
+          </a>
+        </div>
       </div>
 
       {/* Stats */}
