@@ -329,13 +329,16 @@ export default function PlannerPage() {
     };
     setPlan(optimisticNext);
 
+    // Don't send releasedBy from the frontend — the Lambda's authorizer
+    // context already has the user's UUID (from the JWT `sub` claim) and
+    // released_by is a UUID column. Sending the email here makes Postgres
+    // reject the value with "invalid input syntax for type uuid".
     const res = await fetch(`/api/planner/plans/${selectedId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         status: 'released',
         releasedAt,
-        releasedBy: reviewerId,
         phases: optimisticNext.phases,
       }),
     });
