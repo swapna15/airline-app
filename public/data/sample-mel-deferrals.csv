@@ -1,0 +1,6 @@
+tail,mel_id,deferred_at,description,due_at,airframe_hours_at_open,parts_on_order,placard_installed,released_by
+G-XLEK,MEL-30-01,2026-04-26,"Engine #1 anti-ice valve unresponsive on walk-around",2026-05-06,42851.4,false,true,ENG-2245
+G-XLEK,MEL-33-01,2026-04-21,"Left landing light bulb burnt out — replacement on order",2026-05-21,42832.9,true,true,ENG-2118
+N801AA,MEL-23-01,2026-04-27,"HF radio #1 failed BIT during pre-flight",2026-05-07,18742.0,false,true,ENG-1031
+N801AA,MEL-22-01,2026-04-24,"CAT III autoland self-test failure",2026-05-04,18712.5,false,false,ENG-1031
+D-AIMA,MEL-24-01,2026-04-28,"APU INOP — overhaul scheduled at next C-check",2026-05-08,12480.2,false,true,ENG-3340

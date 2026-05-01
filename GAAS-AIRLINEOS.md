@@ -1380,6 +1380,89 @@ Required Vercel env:
 | `EMBEDDING_PROVIDER` | `voyage` or `openai` |
 | `VOYAGE_API_KEY` or `OPENAI_API_KEY` | Per the above |
 
+### 10.3 Cost-saving teardown (drop AWS, keep the demo running on Vercel)
+
+Aurora Serverless v2 + RDS Proxy + NAT Gateway are the cost drivers (≈ $50–80/mo
+sitting idle). The platform is designed to run **without AWS at all** — mocks for
+flight data, in-memory store for plans + RAG corpus, deterministic local agents.
+The UI does **not** break when AWS is gone.
+
+#### Tear down AWS
+
+```bash
+cd infra/terraform
+terraform destroy        # asks for confirmation, drops VPC + Aurora + Lambdas + API Gateway
+```
+
+This deletes only cloud resources. **All code stays as-is** — bring it back any
+time with `terraform apply` + the migrate Lambda invoke (re-creates schema, RLS,
+seed data).
+
+#### Update Vercel env vars
+
+In your Vercel project → Settings → Environment Variables, **remove** these:
+
+| Variable | Why remove |
+|---|---|
+| `NEXT_PUBLIC_API_URL` | App falls back to MockAdapter / in-memory automatically |
+
+**Keep** these (still used):
+
+| Variable | Why keep |
+|---|---|
+| `NEXTAUTH_SECRET`, `NEXTAUTH_URL` | NextAuth still issues JWTs locally |
+| `ANTHROPIC_API_KEY` | The five planning agents still call Claude |
+| `EMBEDDING_PROVIDER=mock` (or unset) | Mock embeddings work offline |
+
+That's it. Redeploy.
+
+#### What runs on which fallback
+
+| Surface | Without `NEXT_PUBLIC_API_URL` |
+|---|---|
+| Passenger search | `MockAdapter` — deterministic 50-flight schedule |
+| Bookings | In-memory; lost on cold start (acceptable for demo) |
+| Sign-in | NextAuth credentials with email-prefix role derivation (`admin@…`, `planner@…`) |
+| Planner phases | All engines run; agents call Claude; data persists in `globalThis` map |
+| `/admin/ops-specs` | `DEFAULT_OPS_SPECS` (read-only — saves require API_URL) |
+| `/admin/ai/memory` | `InMemoryVectorStore` — accepts saves, lost on cold start |
+| Fuel-price / MEL / crew | `mock` providers (default) — built-in static fixtures |
+| Vector store | In-memory, HMR-safe |
+
+#### (Optional) Use CSV fixtures instead of mocks for richer data
+
+The `scripts/sample-*.csv` files are also published to `public/data/` and served
+as static assets by the same Vercel deployment. Point the integrations at them:
+
+```bash
+# On Vercel — replace <your-vercel-url> with your actual deployment URL
+FUEL_PRICE_PROVIDER=csv
+FUEL_PRICE_CSV_URI=https://<your-vercel-url>/data/sample-fuel-prices.csv
+
+MEL_PROVIDER=csv
+MEL_CSV_URI=https://<your-vercel-url>/data/sample-mel-deferrals.csv
+
+CREW_PROVIDER=csv
+CREW_ROSTER_URI=https://<your-vercel-url>/data/sample-crew-roster.csv
+CREW_ASSIGNMENTS_URI=https://<your-vercel-url>/data/sample-crew-assignments.csv
+```
+
+The fetcher (`lib/integrations/fetcher.ts`) handles `https://` URIs natively;
+no auth tokens needed for the public assets.
+
+#### Bring AWS back when needed
+
+```bash
+cd infra/terraform
+terraform apply -var="frontend_url=https://<your-app>.vercel.app" \
+                -var="nextauth_secret=<same secret as Vercel>"
+aws lambda invoke --function-name airline-app-migrate --payload '{}' /tmp/m.json
+# Then put NEXT_PUBLIC_API_URL back on Vercel and redeploy
+```
+
+The schema (12 migrations) is idempotent; tenants + ops_specs + dispatcher_certs
+need to be re-seeded since destroy drops the whole cluster.
+
 ---
 
 ## 11. Configuration reference (every per-tenant knob)
